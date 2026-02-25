@@ -32,7 +32,7 @@ export function useHousehold() {
   async function createHousehold(name) {
     const { data: hh, error: hhErr } = await supabase
       .from('households')
-      .insert({ name })
+      .insert({ name, created_by: user.id })
       .select()
       .single()
     if (hhErr) return { error: hhErr }
