@@ -10,6 +10,9 @@ import PantryPage from './pages/pantry/PantryPage'
 import RecipesPage from './pages/recipes/RecipesPage'
 import CalendarPage from './pages/calendar/CalendarPage'
 import ShoppingPage from './pages/shopping/ShoppingPage'
+import LeftoversPage from './pages/leftovers/LeftoversPage'
+import NutritionPage from './pages/nutrition/NutritionPage'
+import ReceiptPage from './pages/receipts/ReceiptPage'
 
 function HouseholdGate({ children }) {
   const { household, loading } = useHousehold()
@@ -44,6 +47,9 @@ function AppRoutes() {
         <Route path="recipes" element={<RecipesPage />} />
         <Route path="calendar" element={<CalendarPage />} />
         <Route path="shopping" element={<ShoppingPage />} />
+        <Route path="leftovers" element={<LeftoversPage />} />
+        <Route path="nutrition" element={<NutritionPage />} />
+        <Route path="receipts" element={<ReceiptPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
