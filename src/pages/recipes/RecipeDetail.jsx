@@ -91,6 +91,19 @@ export default function RecipeDetail({ recipe, onEdit, onDelete, onBack, onRate 
             <p className="text-sm text-yellow-800 whitespace-pre-wrap">{recipe.notes}</p>
           </div>
         )}
+
+        {recipe.source_url && (
+          <div className="mt-4 pt-4 border-t border-gray-100">
+            <a
+              href={recipe.source_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-xs text-blue-500 hover:underline flex items-center gap-1"
+            >
+              View original recipe ↗
+            </a>
+          </div>
+        )}
       </div>
 
       {showCookModal && (

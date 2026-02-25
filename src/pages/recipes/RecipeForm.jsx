@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 
 const UNITS = ['count', 'lbs', 'oz', 'g', 'kg', 'cups', 'liters', 'ml', 'gallons', 'dozen', 'bunch', 'bag', 'box', 'can', 'bottle', 'jar', 'tsp', 'tbsp', 'pinch']
 const CATEGORIES = ['produce', 'dairy', 'meat', 'frozen', 'pantry', 'beverages', 'snacks', 'other']
@@ -11,21 +11,27 @@ const DEFAULTS = {
   instructions: '',
   notes: '',
   rating: null,
+  source_url: '',
   ingredients: [{ ...EMPTY_INGREDIENT }],
 }
 
-export default function RecipeForm({ initial, onSave, onClose }) {
+// pantryItems: [{ name, unit }]
+// allIngredients: [{ name, unit, count }] sorted by frequency
+export default function RecipeForm({ initial, onSave, onClose, pantryItems = [], allIngredients = [] }) {
   const [form, setForm] = useState(initial ? {
     name: initial.name,
     total_servings: initial.total_servings,
     instructions: initial.instructions ?? '',
     notes: initial.notes ?? '',
     rating: initial.rating ?? null,
+    source_url: initial.source_url ?? '',
     ingredients: initial.recipe_ingredients?.length
       ? initial.recipe_ingredients.map(({ id, recipe_id, ...i }) => i)
       : [{ ...EMPTY_INGREDIENT }],
   } : DEFAULTS)
   const [loading, setLoading] = useState(false)
+  const [dropdownIdx, setDropdownIdx] = useState(null)
+  const blurTimerRef = useRef(null)
 
   function setField(field, value) {
     setForm(f => ({ ...f, [field]: value }))
@@ -47,6 +53,39 @@ export default function RecipeForm({ initial, onSave, onClose }) {
     setForm(f => ({ ...f, ingredients: f.ingredients.filter((_, i) => i !== index) }))
   }
 
+  function getSuggestions(idx) {
+    const typed = (form.ingredients[idx]?.name ?? '').trim()
+    if (typed.length < 1) return []
+    const lower = typed.toLowerCase()
+
+    const pantryMatches = pantryItems
+      .filter(p => p.name.toLowerCase().includes(lower))
+      .slice(0, 5)
+      .map(p => ({ name: p.name, unit: p.unit, fromPantry: true }))
+
+    const pantryNames = new Set(pantryMatches.map(p => p.name.toLowerCase()))
+
+    const recentMatches = allIngredients
+      .filter(a => a.name.toLowerCase().includes(lower) && !pantryNames.has(a.name.toLowerCase()))
+      .slice(0, 4)
+      .map(a => ({ name: a.name, unit: a.unit, fromPantry: false }))
+
+    return [...pantryMatches, ...recentMatches]
+  }
+
+  function selectSuggestion(idx, suggestion) {
+    clearTimeout(blurTimerRef.current)
+    setIngredient(idx, 'name', suggestion.name)
+    if (suggestion.unit && UNITS.includes(suggestion.unit)) {
+      setIngredient(idx, 'unit', suggestion.unit)
+    }
+    setDropdownIdx(null)
+  }
+
+  function handleIngredientBlur() {
+    blurTimerRef.current = setTimeout(() => setDropdownIdx(null), 180)
+  }
+
   async function handleSubmit(e) {
     e.preventDefault()
     setLoading(true)
@@ -56,6 +95,7 @@ export default function RecipeForm({ initial, onSave, onClose }) {
       instructions: form.instructions.trim() || null,
       notes: form.notes.trim() || null,
       rating: form.rating,
+      source_url: form.source_url.trim() || null,
       ingredients: form.ingredients
         .filter(i => i.name.trim())
         .map(i => ({ ...i, quantity: Number(i.quantity) })),
@@ -114,41 +154,72 @@ export default function RecipeForm({ initial, onSave, onClose }) {
               </button>
             </div>
             <div className="flex flex-col gap-2">
-              {form.ingredients.map((ing, i) => (
-                <div key={i} className="flex gap-2 items-center">
-                  <input
-                    value={ing.quantity}
-                    onChange={e => setIngredient(i, 'quantity', e.target.value)}
-                    type="number"
-                    min="0"
-                    step="any"
-                    className="w-16 border border-gray-300 rounded-lg px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-400"
-                    placeholder="Qty"
-                  />
-                  <select
-                    value={ing.unit}
-                    onChange={e => setIngredient(i, 'unit', e.target.value)}
-                    className="w-20 border border-gray-300 rounded-lg px-2 py-2 text-sm focus:outline-none"
-                  >
-                    {UNITS.map(u => <option key={u} value={u}>{u}</option>)}
-                  </select>
-                  <input
-                    value={ing.name}
-                    onChange={e => setIngredient(i, 'name', e.target.value)}
-                    placeholder="Ingredient name"
-                    className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-400"
-                  />
-                  {form.ingredients.length > 1 && (
-                    <button
-                      type="button"
-                      onClick={() => removeIngredient(i)}
-                      className="text-gray-400 hover:text-red-400 text-lg leading-none shrink-0"
+              {form.ingredients.map((ing, i) => {
+                const suggestions = dropdownIdx === i ? getSuggestions(i) : []
+                return (
+                  <div key={i} className="flex gap-2 items-center">
+                    <input
+                      value={ing.quantity}
+                      onChange={e => setIngredient(i, 'quantity', e.target.value)}
+                      type="number"
+                      min="0"
+                      step="any"
+                      className="w-16 border border-gray-300 rounded-lg px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-400"
+                      placeholder="Qty"
+                    />
+                    <select
+                      value={ing.unit}
+                      onChange={e => setIngredient(i, 'unit', e.target.value)}
+                      className="w-20 border border-gray-300 rounded-lg px-2 py-2 text-sm focus:outline-none"
                     >
-                      ✕
-                    </button>
-                  )}
-                </div>
-              ))}
+                      {UNITS.map(u => <option key={u} value={u}>{u}</option>)}
+                    </select>
+
+                    {/* Name with autocomplete */}
+                    <div className="flex-1 relative">
+                      <input
+                        value={ing.name}
+                        onChange={e => setIngredient(i, 'name', e.target.value)}
+                        onFocus={() => setDropdownIdx(i)}
+                        onBlur={handleIngredientBlur}
+                        placeholder="Ingredient name"
+                        autoComplete="off"
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-400"
+                      />
+                      {suggestions.length > 0 && (
+                        <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-xl shadow-lg z-50 max-h-44 overflow-y-auto">
+                          {suggestions.map((s, si) => (
+                            <button
+                              key={si}
+                              type="button"
+                              onMouseDown={() => selectSuggestion(i, s)}
+                              className="w-full flex items-center gap-2 px-3 py-2 text-left text-sm hover:bg-gray-50 first:rounded-t-xl last:rounded-b-xl"
+                            >
+                              <span className={`text-xs px-1.5 py-0.5 rounded font-medium shrink-0 ${s.fromPantry ? 'bg-green-100 text-green-700' : 'bg-blue-50 text-blue-600'}`}>
+                                {s.fromPantry ? 'pantry' : 'recent'}
+                              </span>
+                              <span className="text-gray-700 truncate">{s.name}</span>
+                              {s.unit && s.unit !== 'count' && (
+                                <span className="text-gray-400 text-xs shrink-0">({s.unit})</span>
+                              )}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    {form.ingredients.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => removeIngredient(i)}
+                        className="text-gray-400 hover:text-red-400 text-lg leading-none shrink-0"
+                      >
+                        ✕
+                      </button>
+                    )}
+                  </div>
+                )
+              })}
             </div>
           </div>
 
@@ -179,6 +250,19 @@ export default function RecipeForm({ initial, onSave, onClose }) {
               className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-400 resize-none"
             />
           </div>
+
+          {/* Source URL (shown if populated from import) */}
+          {form.source_url && (
+            <div>
+              <label className="text-xs font-medium text-gray-600 mb-1 block">Source URL</label>
+              <input
+                value={form.source_url}
+                onChange={e => setField('source_url', e.target.value)}
+                placeholder="https://..."
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-400 text-gray-500"
+              />
+            </div>
+          )}
 
           {/* Actions */}
           <div className="flex gap-3 pt-1">
