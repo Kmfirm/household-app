@@ -1,13 +1,22 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { AuthProvider, useAuth } from './context/AuthContext'
+import { useHousehold } from './hooks/useHousehold'
 import Layout from './components/layout/Layout'
 import Login from './pages/auth/Login'
 import Register from './pages/auth/Register'
+import HouseholdSetup from './pages/HouseholdSetup'
 import Dashboard from './pages/Dashboard'
 import PantryPage from './pages/pantry/PantryPage'
 import RecipesPage from './pages/recipes/RecipesPage'
 import CalendarPage from './pages/calendar/CalendarPage'
 import ShoppingPage from './pages/shopping/ShoppingPage'
+
+function HouseholdGate({ children }) {
+  const { household, loading } = useHousehold()
+  if (loading) return <div className="min-h-screen flex items-center justify-center text-gray-400">Loading...</div>
+  if (!household) return <HouseholdSetup />
+  return children
+}
 
 function ProtectedRoute({ children }) {
   const { user, loading } = useAuth()
@@ -24,7 +33,9 @@ function AppRoutes() {
         path="/"
         element={
           <ProtectedRoute>
-            <Layout />
+            <HouseholdGate>
+              <Layout />
+            </HouseholdGate>
           </ProtectedRoute>
         }
       >
