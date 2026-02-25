@@ -15,8 +15,12 @@ export default function HouseholdSetup() {
     const result = mode === 'create'
       ? await createHousehold(value)
       : await joinHousehold(value)
-    if (result.error) setError(result.error.message)
-    setLoading(false)
+    if (result.error) {
+      setError(result.error.message)
+      setLoading(false)
+    } else {
+      window.location.href = '/'
+    }
   }
 
   return (
