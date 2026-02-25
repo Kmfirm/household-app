@@ -15,6 +15,11 @@ const secondaryNav = [
   { to: '/receipts', label: 'Receipts', icon: '🧾' },
 ]
 
+const phase3Nav = [
+  { to: '/analytics', label: 'Analytics', icon: '📊' },
+  { to: '/suggestions', label: 'Suggestions', icon: '✨' },
+]
+
 export default function Layout() {
   const { signOut } = useAuth()
 
@@ -57,8 +62,17 @@ export default function Layout() {
             <span>{icon}</span>{label}
           </NavLink>
         ))}
-        <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide px-3 mb-1 mt-4">Phase 2</p>
+        <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide px-3 mb-1 mt-4">More</p>
         {secondaryNav.map(({ to, label, icon }) => (
+          <NavLink key={to} to={to}
+            className={({ isActive }) =>
+              `flex items-center gap-3 px-3 py-2 rounded-lg text-sm ${isActive ? 'bg-green-50 text-green-700 font-medium' : 'text-gray-600 hover:bg-gray-100'}`
+            }>
+            <span>{icon}</span>{label}
+          </NavLink>
+        ))}
+        <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide px-3 mb-1 mt-4">Insights</p>
+        {phase3Nav.map(({ to, label, icon }) => (
           <NavLink key={to} to={to}
             className={({ isActive }) =>
               `flex items-center gap-3 px-3 py-2 rounded-lg text-sm ${isActive ? 'bg-green-50 text-green-700 font-medium' : 'text-gray-600 hover:bg-gray-100'}`
