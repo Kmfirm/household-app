@@ -37,7 +37,7 @@ serve(async (req) => {
       },
       body: JSON.stringify({
         model: 'claude-haiku-4-5-20251001',
-        max_tokens: 1024,
+        max_tokens: 2048,
         messages: [{
           role: 'user',
           content: [
@@ -47,16 +47,24 @@ serve(async (req) => {
             },
             {
               type: 'text',
-              text: `Extract all grocery/food line items from this receipt.
-Return ONLY a valid JSON array, no other text.
-Each item should have:
-- name: string (full product name, expand abbreviations e.g. CHX -> Chicken)
+              text: `Extract information from this grocery receipt and return ONLY a valid JSON object, no other text.
+
+The object must have:
+- store_name: string (the store name, e.g. "ShopRite of Mt. Laurel")
+- purchase_date: string (ISO format YYYY-MM-DD, e.g. "2026-02-21")
+- items: array of purchased food/grocery items
+
+Each item in the array must have:
+- name: string (full readable product name, expand abbreviations e.g. CHX -> Chicken, DCD -> Diced, CRM -> Cream)
 - quantity: number (default 1 if not shown)
 - unit: string (count, lbs, oz, kg, etc.)
-- price: number or null
+- price: number or null (the positive item price)
 - category: one of: produce, dairy, meat, frozen, pantry, beverages, snacks, other
 
-Skip non-food items like bags, taxes, totals, and store fees.`,
+IMPORTANT rules for items:
+- Only include items that were physically purchased (positive price lines)
+- Skip discounts, coupons, savings lines, "You Saved", and any line with a negative or zero price
+- Skip taxes, totals, balance, fees, and non-food items like bags`,
             },
           ],
         }],
@@ -75,10 +83,15 @@ Skip non-food items like bags, taxes, totals, and store fees.`,
     const claudeData = await claudeRes.json()
     const text = claudeData.content?.[0]?.text ?? ''
     const clean = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
-    const items = JSON.parse(clean)
+    const parsed = JSON.parse(clean)
+
+    // Support both old array format and new object format
+    const items = Array.isArray(parsed) ? parsed : (parsed.items ?? [])
+    const store_name = parsed.store_name ?? null
+    const purchase_date = parsed.purchase_date ?? null
 
     return new Response(
-      JSON.stringify({ items }),
+      JSON.stringify({ items, store_name, purchase_date }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
   } catch (err) {

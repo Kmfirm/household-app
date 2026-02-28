@@ -105,6 +105,8 @@ export default function ReceiptPage() {
       }
 
       setItems(data.items.map((item, i) => ({ ...item, id: i, selected: true })))
+      if (data.store_name) setStoreName(data.store_name)
+      if (data.purchase_date) setPurchaseDate(data.purchase_date)
       setStep('review')
     } catch (err) {
       console.error('ocr-receipt exception:', err)
