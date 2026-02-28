@@ -91,10 +91,25 @@ Abbreviation key (always expand these):
 IMPORTANT rules for discounts:
 - Discount lines appear as negative prices, or lines labeled "Off", "On Sale", "Coupon", or "You Saved"
 - Do NOT create a separate item for a discount line
-- Instead, subtract the discount amount from the price of the item it applies to
-- A discount line applies to the item immediately above it, or the item whose name it references
-- Summary "You Saved $X" lines at the bottom are totals — ignore them (individual discounts are already applied above)
-- Skip taxes, totals, balance, and non-food fees`,
+- Instead, subtract the discount from the price of the item immediately above it (or the item it references by name)
+- The item's final price = item price - discount amount
+- Summary "You Saved $X.XX" lines at the end are totals — skip them entirely
+- Skip taxes, totals, balance, and non-food fees
+
+Example of correct discount handling:
+Receipt lines:
+  HUNT TOM DCD FIRE PC   1.69
+  Hunts or Rotel Off     1.67-
+  SRBB CREAM CHS BRI     1.69
+  On Sale                0.60
+
+Correct output:
+  { scanned_name: "HUNT TOM DCD FIRE PC", brand_name: "Hunt's Diced Fire Roasted Tomatoes", generic_name: "Diced Fire Roasted Tomatoes", price: 0.02 }
+  { scanned_name: "SRBB CREAM CHS BRI", brand_name: "ShopRite Bowl & Basket Cream Cheese Brick", generic_name: "Cream Cheese Brick", price: 1.09 }
+
+Wrong output (do NOT do this):
+  { name: "Hunt's Diced Fire Roasted Tomatoes", price: 1.69 }
+  { name: "Hunts or Rotel Off", price: -1.67 }   <-- NEVER output a discount as an item`,
             },
           ],
         }],
