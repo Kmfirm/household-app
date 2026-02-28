@@ -85,8 +85,19 @@ IMPORTANT rules for items:
 
     const claudeData = await claudeRes.json()
     const text = claudeData.content?.[0]?.text ?? ''
+    console.log('Claude raw response:', text)
     const clean = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
-    const parsed = JSON.parse(clean)
+
+    let parsed
+    try {
+      parsed = JSON.parse(clean)
+    } catch (parseErr) {
+      console.error('JSON parse failed. Raw text:', text)
+      return new Response(
+        JSON.stringify({ error: 'Failed to parse AI response as JSON', raw: text }),
+        { status: 502, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
 
     // Support both old array format and new object format
     const items = Array.isArray(parsed) ? parsed : (parsed.items ?? [])
@@ -98,6 +109,7 @@ IMPORTANT rules for items:
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
   } catch (err) {
+    console.error('Unhandled error:', err.message)
     return new Response(
       JSON.stringify({ error: err.message }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
