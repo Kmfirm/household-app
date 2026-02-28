@@ -55,19 +55,44 @@ The object must have:
 - items: array of purchased food/grocery items
 
 Each item in the array must have:
-- name: string (full readable product name, expand abbreviations e.g. CHX -> Chicken, DCD -> Diced, CRM -> Cream)
+- name: string (full readable product name, expand abbreviations using the key below)
 - quantity: number (default 1 if not shown)
 - unit: string (count, lbs, oz, kg, etc.)
-- price: number or null (the positive item price)
+- price: number or null (the net price after any discounts — see rules below)
 - category: one of: produce, dairy, meat, frozen, pantry, beverages, snacks, other
 
-IMPORTANT rules for items:
-- Only include items that were physically purchased (positive price lines)
-- Do NOT create separate entries for discounts, coupons, or savings lines
-- Instead, apply any discount or coupon to the item it belongs to: subtract the discount amount from that item's price so the price reflects what was actually paid
-- A discount line immediately following an item (or referencing it by name) applies to that item
-- General "You Saved" summary lines at the bottom should be ignored (the per-item discounts already cover them)
-- Skip taxes, totals, balance, fees, and non-food items like bags`,
+Abbreviation key (always expand these):
+- SRBB = ShopRite Bowl & Basket (store brand)
+- STRBK / STARBUCK = Starbucks
+- HUNT TOM = Hunt's Tomatoes
+- DCD = Diced
+- CRM = Cream
+- CHS = Cheese
+- BRI = Brick
+- ALM = Almond
+- OAT = Oatmilk
+- IC = Iced
+- DK RST = Dark Roast
+- VS = Bone-In (VS BONE IN = Bone-In)
+- TH = Thighs
+- GRK = Greek
+- CBT = Chobani
+- HF = Hillshire Farm
+- SMKD = Smoked
+- KEL = Kellogg's
+- CHOCO = Chocolate
+- PC = Pack
+- WP = Weight Watchers / store equivalent
+- ALM MILK = Almond Milk
+- UNSWT = Unsweetened
+
+IMPORTANT rules for discounts:
+- Discount lines appear as negative prices, or lines labeled "Off", "On Sale", "Coupon", or "You Saved"
+- Do NOT create a separate item for a discount line
+- Instead, subtract the discount amount from the price of the item it applies to
+- A discount line applies to the item immediately above it, or the item whose name it references
+- Summary "You Saved $X" lines at the bottom are totals — ignore them (individual discounts are already applied above)
+- Skip taxes, totals, balance, and non-food fees`,
             },
           ],
         }],
