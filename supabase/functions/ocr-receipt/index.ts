@@ -52,64 +52,55 @@ serve(async (req) => {
 The object must have:
 - store_name: string (the store name, e.g. "ShopRite of Mt. Laurel")
 - purchase_date: string (ISO format YYYY-MM-DD, e.g. "2026-02-21")
-- items: array of purchased food/grocery items
+- lines: array of ALL line entries in receipt order — both purchased items AND discount lines
 
-Each item in the array must have:
-- scanned_name: string (the original text exactly as it appears on the receipt, e.g. "SRBB VS BONE IN TH")
-- brand_name: string (fully expanded brand product name, e.g. "ShopRite Bowl & Basket Bone-In Chicken Thighs")
-- generic_name: string (the generic product name with no brand, e.g. "Bone-In Chicken Thighs" — used for recipe matching)
-- quantity: number (default 1 if not shown)
+Each entry in lines must have:
+- type: "item" or "discount"
+
+If type is "item":
+- scanned_name: string (original text exactly as on receipt, e.g. "SRBB VS BONE IN TH")
+- brand_name: string (fully expanded brand name, e.g. "ShopRite Bowl & Basket Bone-In Chicken Thighs")
+- generic_name: string (generic name with no brand, e.g. "Bone-In Chicken Thighs")
+- quantity: number (default 1)
 - unit: string (count, lbs, oz, kg, etc.)
-- price: number or null (the net price after any discounts — see rules below)
+- price: number or null (the list price as printed — do NOT subtract discounts)
 - category: one of: produce, dairy, meat, frozen, pantry, beverages, snacks, other
+
+If type is "discount":
+- amount: number (the positive discount value, e.g. 1.67)
+- label: string (the text on the receipt, e.g. "Hunts or Rotel Off")
 
 Abbreviation key (always expand these):
 - SRBB = ShopRite Bowl & Basket (store brand)
 - STRBK / STARBUCK = Starbucks
 - HUNT TOM = Hunt's Tomatoes
-- DCD = Diced
-- CRM = Cream
-- CHS = Cheese
-- BRI = Brick
-- ALM = Almond
-- OAT = Oatmilk
-- IC = Iced
-- DK RST = Dark Roast
-- VS = Bone-In (VS BONE IN = Bone-In)
-- TH = Thighs
-- GRK = Greek
-- CBT = Chobani
-- HF = Hillshire Farm
-- SMKD = Smoked
-- KEL = Kellogg's
-- CHOCO = Chocolate
-- PC = Pack
-- WP = Weight Watchers / store equivalent
-- ALM MILK = Almond Milk
-- UNSWT = Unsweetened
+- DCD = Diced, CRM = Cream, CHS = Cheese, BRI = Brick
+- ALM = Almond, OAT = Oatmilk, IC = Iced, DK RST = Dark Roast
+- VS BONE IN = Bone-In, TH = Thighs
+- GRK = Greek, CBT = Chobani
+- HF = Hillshire Farm, SMKD = Smoked
+- KEL = Kellogg's, CHOCO = Chocolate, PC = Pack
+- WP ALM MILK UNSWT = Unsweetened Almond Milk
 
-IMPORTANT rules for discounts:
-- Discount lines appear as negative prices, or lines labeled "Off", "On Sale", "Coupon", or "You Saved"
-- Do NOT create a separate item for a discount line
-- Instead, subtract the discount from the price of the item immediately above it (or the item it references by name)
-- The item's final price = item price - discount amount
-- Summary "You Saved $X.XX" lines at the end are totals — skip them entirely
-- Skip taxes, totals, balance, and non-food fees
+What counts as a discount line (type: "discount"):
+- Any line with a negative price or a trailing minus sign (e.g. "1.67-")
+- Any line containing words like: Off, On Sale, Sale, Coupon, Savings, You Saved
 
-Example of correct discount handling:
-Receipt lines:
+What to skip entirely (do not include in lines at all):
+- Summary "You Saved $X.XX" totals at the bottom
+- Taxes, subtotals, totals, balance, fees, non-food items like bags
+
+Example input lines on receipt:
   HUNT TOM DCD FIRE PC   1.69
   Hunts or Rotel Off     1.67-
   SRBB CREAM CHS BRI     1.69
   On Sale                0.60
 
-Correct output:
-  { scanned_name: "HUNT TOM DCD FIRE PC", brand_name: "Hunt's Diced Fire Roasted Tomatoes", generic_name: "Diced Fire Roasted Tomatoes", price: 0.02 }
-  { scanned_name: "SRBB CREAM CHS BRI", brand_name: "ShopRite Bowl & Basket Cream Cheese Brick", generic_name: "Cream Cheese Brick", price: 1.09 }
-
-Wrong output (do NOT do this):
-  { name: "Hunt's Diced Fire Roasted Tomatoes", price: 1.69 }
-  { name: "Hunts or Rotel Off", price: -1.67 }   <-- NEVER output a discount as an item`,
+Example output lines:
+  { "type": "item", "scanned_name": "HUNT TOM DCD FIRE PC", "brand_name": "Hunt's Diced Fire Roasted Tomatoes", "generic_name": "Diced Fire Roasted Tomatoes", "price": 1.69, "quantity": 1, "unit": "count", "category": "pantry" }
+  { "type": "discount", "amount": 1.67, "label": "Hunts or Rotel Off" }
+  { "type": "item", "scanned_name": "SRBB CREAM CHS BRI", "brand_name": "ShopRite Bowl & Basket Cream Cheese Brick", "generic_name": "Cream Cheese Brick", "price": 1.69, "quantity": 1, "unit": "count", "category": "dairy" }
+  { "type": "discount", "amount": 0.60, "label": "On Sale" }`,
             },
           ],
         }],
@@ -141,13 +132,26 @@ Wrong output (do NOT do this):
       )
     }
 
-    // Support both old array format and new object format
-    const rawItems = Array.isArray(parsed) ? parsed : (parsed.items ?? [])
-    // Normalise: map generic_name -> name for backward compat, keep brand_name + scanned_name
-    const items = rawItems.map((item: any) => ({
-      ...item,
-      name: item.generic_name ?? item.name,
-    }))
+    // Walk lines in order, applying each discount to the item immediately above it
+    const lines: any[] = Array.isArray(parsed) ? parsed : (parsed.lines ?? parsed.items ?? [])
+    const items: any[] = []
+    let lastItem: any = null
+
+    for (const line of lines) {
+      if (line.type === 'discount') {
+        if (lastItem) {
+          lastItem.price = Math.max(0, Math.round(((lastItem.price ?? 0) - (line.amount ?? 0)) * 100) / 100)
+        }
+      } else {
+        // item (or legacy format without type field)
+        lastItem = {
+          ...line,
+          name: line.generic_name ?? line.name,
+        }
+        items.push(lastItem)
+      }
+    }
+
     const store_name = parsed.store_name ?? null
     const purchase_date = parsed.purchase_date ?? null
 
