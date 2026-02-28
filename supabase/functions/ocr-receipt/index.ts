@@ -63,7 +63,10 @@ Each item in the array must have:
 
 IMPORTANT rules for items:
 - Only include items that were physically purchased (positive price lines)
-- Skip discounts, coupons, savings lines, "You Saved", and any line with a negative or zero price
+- Do NOT create separate entries for discounts, coupons, or savings lines
+- Instead, apply any discount or coupon to the item it belongs to: subtract the discount amount from that item's price so the price reflects what was actually paid
+- A discount line immediately following an item (or referencing it by name) applies to that item
+- General "You Saved" summary lines at the bottom should be ignored (the per-item discounts already cover them)
 - Skip taxes, totals, balance, fees, and non-food items like bags`,
             },
           ],
