@@ -247,15 +247,19 @@ export default function ReceiptPage() {
           <div className="flex flex-col gap-3">
             {receipts.map(r => (
               <div key={r.id} className="bg-white rounded-xl border border-gray-100 p-4 flex items-center gap-3">
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-gray-800 truncate">
+                    {r.store_name || 'Unknown store'} — {r.purchase_date}
+                  </p>
+                  {r.total_spent != null && (
+                    <p className="text-xs text-gray-500 mt-0.5">${parseFloat(r.total_spent).toFixed(2)}</p>
+                  )}
+                </div>
                 <button
                   onClick={() => handleOpenReceipt(r)}
-                  className="flex-1 text-left"
+                  className="text-xs text-green-600 hover:text-green-800 font-medium px-2 py-1 border border-green-200 rounded-lg"
                 >
-                  <p className="text-sm font-medium text-gray-800">{r.store_name || 'Unknown store'}</p>
-                  <p className="text-xs text-gray-500 mt-0.5">
-                    {r.purchase_date}
-                    {r.total_spent != null && ` · $${parseFloat(r.total_spent).toFixed(2)}`}
-                  </p>
+                  Edit
                 </button>
                 <button
                   onClick={() => {
