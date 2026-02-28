@@ -132,23 +132,25 @@ Example output lines:
       )
     }
 
-    // Walk lines in order, applying each discount to the item immediately above it
+    // Walk lines in order, tracking item indices so discounts know which item they follow
     const lines: any[] = Array.isArray(parsed) ? parsed : (parsed.lines ?? parsed.items ?? [])
     const items: any[] = []
-    let lastItem: any = null
+    const discounts: any[] = []
+    let lastItemIndex: number | null = null
 
     for (const line of lines) {
       if (line.type === 'discount') {
-        if (lastItem) {
-          lastItem.price = Math.max(0, Math.round(((lastItem.price ?? 0) - (line.amount ?? 0)) * 100) / 100)
-        }
+        discounts.push({
+          label: line.label ?? 'Discount',
+          amount: line.amount ?? 0,
+          linked_to: lastItemIndex, // index into items array, matches React id assignment
+        })
       } else {
-        // item (or legacy format without type field)
-        lastItem = {
+        lastItemIndex = items.length
+        items.push({
           ...line,
           name: line.generic_name ?? line.name,
-        }
-        items.push(lastItem)
+        })
       }
     }
 
@@ -156,7 +158,7 @@ Example output lines:
     const purchase_date = parsed.purchase_date ?? null
 
     return new Response(
-      JSON.stringify({ items, store_name, purchase_date }),
+      JSON.stringify({ items, discounts, store_name, purchase_date }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
   } catch (err) {

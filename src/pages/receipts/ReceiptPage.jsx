@@ -27,6 +27,7 @@ export default function ReceiptPage() {
 
   const [step, setStep] = useState('list') // list | upload | scanning | review | edit | done
   const [items, setItems] = useState([])
+  const [discounts, setDiscounts] = useState([]) // { id, label, amount, linked_to (item id) }
   const [storeName, setStoreName] = useState('')
   const [purchaseDate, setPurchaseDate] = useState(new Date().toISOString().split('T')[0])
   const [saving, setSaving] = useState(false)
@@ -43,6 +44,13 @@ export default function ReceiptPage() {
     setTimeout(() => setToast(null), 3000)
   }
 
+  // Returns net price for an item after applying linked discounts
+  function getNetPrice(item) {
+    const linked = discounts.filter(d => d.linked_to === item.id)
+    const totalDisc = linked.reduce((sum, d) => sum + (parseFloat(d.amount) || 0), 0)
+    return Math.max(0, Math.round(((parseFloat(item.price) || 0) - totalDisc) * 100) / 100)
+  }
+
   function compressImage(file, maxSizeBytes = 4 * 1024 * 1024) {
     return new Promise((resolve) => {
       const img = new Image()
@@ -52,7 +60,6 @@ export default function ReceiptPage() {
         const canvas = document.createElement('canvas')
         let { width, height } = img
 
-        // Scale down if needed (keep aspect ratio)
         const maxDim = 2048
         if (width > maxDim || height > maxDim) {
           const scale = Math.min(maxDim / width, maxDim / height)
@@ -64,7 +71,6 @@ export default function ReceiptPage() {
         canvas.height = height
         canvas.getContext('2d').drawImage(img, 0, 0, width, height)
 
-        // Try progressively lower quality until under size limit
         let quality = 0.85
         const tryEncode = () => {
           const dataUrl = canvas.toDataURL('image/jpeg', quality)
@@ -105,6 +111,8 @@ export default function ReceiptPage() {
       }
 
       setItems(data.items.map((item, i) => ({ ...item, id: i, selected: true })))
+      // Discounts come back with linked_to as the item index
+      setDiscounts((data.discounts ?? []).map((d, i) => ({ ...d, id: `d${i}` })))
       if (data.store_name) setStoreName(data.store_name)
       if (data.purchase_date) setPurchaseDate(data.purchase_date)
       setStep('review')
@@ -117,6 +125,24 @@ export default function ReceiptPage() {
 
   function updateItem(id, field, value) {
     setItems(prev => prev.map(item => item.id === id ? { ...item, [field]: value } : item))
+  }
+
+  function updateDiscount(id, field, value) {
+    setDiscounts(prev => prev.map(d => d.id === id ? { ...d, [field]: value } : d))
+  }
+
+  function addDiscount() {
+    const newId = `d${Date.now()}`
+    setDiscounts(prev => [...prev, {
+      id: newId,
+      label: 'Discount',
+      amount: 0,
+      linked_to: items[0]?.id ?? null,
+    }])
+  }
+
+  function removeDiscount(id) {
+    setDiscounts(prev => prev.filter(d => d.id !== id))
   }
 
   async function handleConfirm() {
@@ -134,8 +160,8 @@ export default function ReceiptPage() {
       if (!uploadError) imagePath = path
     }
 
-    // Calculate total
-    const totalSpent = selected.reduce((sum, i) => sum + (parseFloat(i.price) || 0), 0)
+    // Calculate total using net prices
+    const totalSpent = selected.reduce((sum, i) => sum + getNetPrice(i), 0)
 
     // Save receipt record
     const { data: receipt } = await supabase.from('receipts').insert({
@@ -147,10 +173,10 @@ export default function ReceiptPage() {
       total_spent: totalSpent > 0 ? totalSpent : null,
     }).select().single()
 
-    // Add selected items to pantry
+    // Add selected items to pantry using net prices
     for (const item of selected) {
       await addItem({
-        name: item.name,           // generic name — used for recipe matching
+        name: item.name,
         brand_name: item.brand_name ?? null,
         scanned_name: item.scanned_name ?? null,
         quantity: item.quantity ?? 1,
@@ -158,7 +184,7 @@ export default function ReceiptPage() {
         category: item.category ?? 'other',
         storage_location: 'pantry',
         store_of_purchase: storeName || null,
-        purchase_price: item.price ?? null,
+        purchase_price: getNetPrice(item),
         receipt_reference_id: receipt?.id ?? null,
       })
     }
@@ -245,6 +271,7 @@ export default function ReceiptPage() {
   function backToList() {
     setStep('list')
     setItems([])
+    setDiscounts([])
     setEditReceipt(null)
     setEditImageUrl(null)
     setStoreName('')
@@ -254,6 +281,7 @@ export default function ReceiptPage() {
   function reset() {
     setStep('list')
     setItems([])
+    setDiscounts([])
     setStoreName('')
     setPurchaseDate(new Date().toISOString().split('T')[0])
     setCurrentFile(null)
@@ -383,60 +411,128 @@ export default function ReceiptPage() {
             <button onClick={() => setStep('upload')} className="text-xs text-gray-400 hover:text-gray-600">Start over</button>
           </div>
 
-          <div className="flex flex-col gap-2 mb-4 max-h-[50vh] overflow-y-auto">
-            {items.map(item => (
-              <div key={item.id}
-                className={`bg-white rounded-xl border p-3 transition-opacity ${!item.selected ? 'opacity-40' : 'border-gray-100'}`}>
-                <div className="flex items-start gap-3">
-                  <input
-                    type="checkbox"
-                    checked={item.selected}
-                    onChange={e => updateItem(item.id, 'selected', e.target.checked)}
-                    className="mt-1 accent-green-600"
-                  />
-                  <div className="flex-1 flex flex-col gap-1">
-                    {item.scanned_name && (
-                      <p className="text-xs text-gray-400 font-mono">{item.scanned_name}</p>
-                    )}
-                    {item.brand_name && (
-                      <input
-                        value={item.brand_name}
-                        onChange={e => updateItem(item.id, 'brand_name', e.target.value)}
-                        className="text-xs text-gray-500 border-b border-transparent hover:border-gray-300 focus:border-green-400 focus:outline-none bg-transparent"
-                      />
-                    )}
+          <div className="flex flex-col gap-2 mb-3 max-h-[45vh] overflow-y-auto">
+            {items.map(item => {
+              const netPrice = getNetPrice(item)
+              const listPrice = parseFloat(item.price) || 0
+              const isDiscounted = netPrice !== listPrice && listPrice > 0
+              return (
+                <div key={item.id}
+                  className={`bg-white rounded-xl border p-3 transition-opacity ${!item.selected ? 'opacity-40' : 'border-gray-100'}`}>
+                  <div className="flex items-start gap-3">
                     <input
-                      value={item.name}
-                      onChange={e => updateItem(item.id, 'name', e.target.value)}
-                      className="text-sm font-medium text-gray-800 border-b border-transparent hover:border-gray-300 focus:border-green-400 focus:outline-none bg-transparent"
+                      type="checkbox"
+                      checked={item.selected}
+                      onChange={e => updateItem(item.id, 'selected', e.target.checked)}
+                      className="mt-1 accent-green-600"
                     />
-                    <div className="flex gap-2 flex-wrap mt-0.5">
-                      <input
-                        type="number"
-                        value={item.quantity}
-                        onChange={e => updateItem(item.id, 'quantity', e.target.value)}
-                        className="w-16 border border-gray-200 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-green-400"
-                      />
-                      <input
-                        value={item.unit}
-                        onChange={e => updateItem(item.id, 'unit', e.target.value)}
-                        className="w-16 border border-gray-200 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-green-400"
-                      />
-                      <select
-                        value={item.category}
-                        onChange={e => updateItem(item.id, 'category', e.target.value)}
-                        className="border border-gray-200 rounded px-2 py-1 text-xs focus:outline-none"
-                      >
-                        {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
-                      </select>
-                      {item.price != null && (
-                        <span className="text-xs text-gray-400 self-center">${item.price}</span>
+                    <div className="flex-1 flex flex-col gap-1">
+                      {item.scanned_name && (
+                        <p className="text-xs text-gray-400 font-mono">{item.scanned_name}</p>
                       )}
+                      {item.brand_name && (
+                        <input
+                          value={item.brand_name}
+                          onChange={e => updateItem(item.id, 'brand_name', e.target.value)}
+                          className="text-xs text-gray-500 border-b border-transparent hover:border-gray-300 focus:border-green-400 focus:outline-none bg-transparent"
+                        />
+                      )}
+                      <input
+                        value={item.name}
+                        onChange={e => updateItem(item.id, 'name', e.target.value)}
+                        className="text-sm font-medium text-gray-800 border-b border-transparent hover:border-gray-300 focus:border-green-400 focus:outline-none bg-transparent"
+                      />
+                      <div className="flex gap-2 flex-wrap mt-0.5 items-center">
+                        <input
+                          type="number"
+                          value={item.quantity}
+                          onChange={e => updateItem(item.id, 'quantity', e.target.value)}
+                          className="w-16 border border-gray-200 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-green-400"
+                        />
+                        <input
+                          value={item.unit}
+                          onChange={e => updateItem(item.id, 'unit', e.target.value)}
+                          className="w-16 border border-gray-200 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-green-400"
+                        />
+                        <select
+                          value={item.category}
+                          onChange={e => updateItem(item.id, 'category', e.target.value)}
+                          className="border border-gray-200 rounded px-2 py-1 text-xs focus:outline-none"
+                        >
+                          {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                        </select>
+                        {listPrice > 0 && (
+                          isDiscounted ? (
+                            <span className="text-xs self-center">
+                              <span className="text-green-600 font-medium">${netPrice.toFixed(2)}</span>
+                              <span className="text-gray-400 line-through ml-1">${listPrice.toFixed(2)}</span>
+                            </span>
+                          ) : (
+                            <span className="text-xs text-gray-400 self-center">${listPrice.toFixed(2)}</span>
+                          )
+                        )}
+                      </div>
                     </div>
                   </div>
                 </div>
-              </div>
-            ))}
+              )
+            })}
+          </div>
+
+          {/* Discounts section */}
+          <div className="mb-3">
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Discounts</p>
+              <button
+                onClick={addDiscount}
+                className="text-xs text-orange-600 hover:text-orange-800 font-medium"
+              >
+                + Add Discount
+              </button>
+            </div>
+
+            {discounts.length === 0 && (
+              <p className="text-xs text-gray-400 text-center py-2">No discounts — tap + to add one manually</p>
+            )}
+
+            <div className="flex flex-col gap-2">
+              {discounts.map(d => (
+                <div key={d.id} className="bg-orange-50 border border-orange-200 rounded-xl p-3 flex gap-2 items-center flex-wrap">
+                  <input
+                    value={d.label}
+                    onChange={e => updateDiscount(d.id, 'label', e.target.value)}
+                    className="flex-1 min-w-24 text-xs text-gray-700 border-b border-orange-300 focus:border-orange-500 focus:outline-none bg-transparent"
+                  />
+                  <div className="flex items-center gap-1">
+                    <span className="text-xs text-gray-500">−$</span>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={d.amount}
+                      onChange={e => updateDiscount(d.id, 'amount', parseFloat(e.target.value) || 0)}
+                      className="w-16 border border-orange-200 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-orange-400"
+                    />
+                  </div>
+                  <select
+                    value={d.linked_to ?? ''}
+                    onChange={e => updateDiscount(d.id, 'linked_to', e.target.value === '' ? null : Number(e.target.value))}
+                    className="border border-orange-200 rounded px-2 py-1 text-xs focus:outline-none bg-white max-w-32"
+                  >
+                    <option value="">Unlinked</option>
+                    {items.map(i => (
+                      <option key={i.id} value={i.id}>{i.name || i.scanned_name}</option>
+                    ))}
+                  </select>
+                  <button
+                    onClick={() => removeDiscount(d.id)}
+                    className="text-orange-400 hover:text-orange-600 text-xs px-1"
+                  >
+                    ✕
+                  </button>
+                </div>
+              ))}
+            </div>
           </div>
 
           <button
