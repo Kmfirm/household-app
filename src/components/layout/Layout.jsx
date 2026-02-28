@@ -38,17 +38,19 @@ export default function Layout() {
         <Outlet />
       </main>
 
-      {/* Bottom nav (mobile — primary pages) */}
-      <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 flex justify-around py-2 md:hidden z-40">
-        {navItems.map(({ to, label, icon }) => (
-          <NavLink key={to} to={to} end={to === '/'}
-            className={({ isActive }) =>
-              `flex flex-col items-center text-xs gap-0.5 px-2 py-1 rounded ${isActive ? 'text-green-600 font-medium' : 'text-gray-500'}`
-            }>
-            <span className="text-lg">{icon}</span>
-            {label}
-          </NavLink>
-        ))}
+      {/* Bottom nav (mobile — scrollable) */}
+      <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 md:hidden z-40">
+        <div className="flex overflow-x-auto scrollbar-hide py-2 px-2 gap-1">
+          {[...navItems, ...secondaryNav, ...phase3Nav].map(({ to, label, icon }) => (
+            <NavLink key={to} to={to} end={to === '/'}
+              className={({ isActive }) =>
+                `flex flex-col items-center text-xs gap-0.5 px-3 py-1 rounded shrink-0 ${isActive ? 'text-green-600 font-medium' : 'text-gray-500'}`
+              }>
+              <span className="text-lg">{icon}</span>
+              {label}
+            </NavLink>
+          ))}
+        </div>
       </nav>
 
       {/* Sidebar (desktop) */}

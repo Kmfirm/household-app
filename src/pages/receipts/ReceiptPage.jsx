@@ -42,14 +42,16 @@ export default function ReceiptPage() {
         })
 
         if (error || !data?.items) {
-          showToast('Could not parse receipt — try a clearer photo')
+          console.error('ocr-receipt error:', error, 'data:', data)
+          showToast(error?.message || 'Could not parse receipt — try a clearer photo')
           setStep('upload')
           return
         }
 
         setItems(data.items.map((item, i) => ({ ...item, id: i, selected: true })))
         setStep('review')
-      } catch {
+      } catch (err) {
+        console.error('ocr-receipt exception:', err)
         showToast('OCR failed — check your network and try again')
         setStep('upload')
       }
