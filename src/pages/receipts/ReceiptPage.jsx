@@ -43,6 +43,46 @@ export default function ReceiptPage() {
     setTimeout(() => setToast(null), 3000)
   }
 
+  function compressImage(file, maxSizeBytes = 4 * 1024 * 1024) {
+    return new Promise((resolve) => {
+      const img = new Image()
+      const url = URL.createObjectURL(file)
+      img.onload = () => {
+        URL.revokeObjectURL(url)
+        const canvas = document.createElement('canvas')
+        let { width, height } = img
+
+        // Scale down if needed (keep aspect ratio)
+        const maxDim = 2048
+        if (width > maxDim || height > maxDim) {
+          const scale = Math.min(maxDim / width, maxDim / height)
+          width = Math.round(width * scale)
+          height = Math.round(height * scale)
+        }
+
+        canvas.width = width
+        canvas.height = height
+        canvas.getContext('2d').drawImage(img, 0, 0, width, height)
+
+        // Try progressively lower quality until under size limit
+        let quality = 0.85
+        const tryEncode = () => {
+          const dataUrl = canvas.toDataURL('image/jpeg', quality)
+          const base64 = dataUrl.split(',')[1]
+          const bytes = Math.ceil((base64.length * 3) / 4)
+          if (bytes > maxSizeBytes && quality > 0.3) {
+            quality -= 0.1
+            tryEncode()
+          } else {
+            resolve({ base64, mimeType: 'image/jpeg' })
+          }
+        }
+        tryEncode()
+      }
+      img.src = url
+    })
+  }
+
   async function handleFileChange(e) {
     const file = e.target.files?.[0]
     if (!file) return
@@ -50,32 +90,27 @@ export default function ReceiptPage() {
     setCurrentFile(file)
     setStep('scanning')
 
-    const reader = new FileReader()
-    reader.onload = async (evt) => {
-      const base64 = evt.target.result.split(',')[1]
-      const mimeType = file.type
+    try {
+      const { base64, mimeType } = await compressImage(file)
 
-      try {
-        const { data, error } = await supabase.functions.invoke('ocr-receipt', {
-          body: { imageBase64: base64, mimeType },
-        })
+      const { data, error } = await supabase.functions.invoke('ocr-receipt', {
+        body: { imageBase64: base64, mimeType },
+      })
 
-        if (error || !data?.items) {
-          console.error('ocr-receipt error:', error, 'data:', data)
-          showToast(error?.message || 'Could not parse receipt — try a clearer photo')
-          setStep('upload')
-          return
-        }
-
-        setItems(data.items.map((item, i) => ({ ...item, id: i, selected: true })))
-        setStep('review')
-      } catch (err) {
-        console.error('ocr-receipt exception:', err)
-        showToast('OCR failed — check your network and try again')
+      if (error || !data?.items) {
+        console.error('ocr-receipt error:', error, 'data:', data)
+        showToast(error?.message || 'Could not parse receipt — try a clearer photo')
         setStep('upload')
+        return
       }
+
+      setItems(data.items.map((item, i) => ({ ...item, id: i, selected: true })))
+      setStep('review')
+    } catch (err) {
+      console.error('ocr-receipt exception:', err)
+      showToast('OCR failed — check your network and try again')
+      setStep('upload')
     }
-    reader.readAsDataURL(file)
   }
 
   function updateItem(id, field, value) {
