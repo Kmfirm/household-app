@@ -150,7 +150,9 @@ export default function ReceiptPage() {
     // Add selected items to pantry
     for (const item of selected) {
       await addItem({
-        name: item.name,
+        name: item.name,           // generic name — used for recipe matching
+        brand_name: item.brand_name ?? null,
+        scanned_name: item.scanned_name ?? null,
         quantity: item.quantity ?? 1,
         unit: item.unit ?? 'count',
         category: item.category ?? 'other',
@@ -392,13 +394,23 @@ export default function ReceiptPage() {
                     onChange={e => updateItem(item.id, 'selected', e.target.checked)}
                     className="mt-1 accent-green-600"
                   />
-                  <div className="flex-1 flex flex-col gap-1.5">
+                  <div className="flex-1 flex flex-col gap-1">
+                    {item.scanned_name && (
+                      <p className="text-xs text-gray-400 font-mono">{item.scanned_name}</p>
+                    )}
+                    {item.brand_name && (
+                      <input
+                        value={item.brand_name}
+                        onChange={e => updateItem(item.id, 'brand_name', e.target.value)}
+                        className="text-xs text-gray-500 border-b border-transparent hover:border-gray-300 focus:border-green-400 focus:outline-none bg-transparent"
+                      />
+                    )}
                     <input
                       value={item.name}
                       onChange={e => updateItem(item.id, 'name', e.target.value)}
                       className="text-sm font-medium text-gray-800 border-b border-transparent hover:border-gray-300 focus:border-green-400 focus:outline-none bg-transparent"
                     />
-                    <div className="flex gap-2 flex-wrap">
+                    <div className="flex gap-2 flex-wrap mt-0.5">
                       <input
                         type="number"
                         value={item.quantity}

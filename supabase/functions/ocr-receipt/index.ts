@@ -55,7 +55,9 @@ The object must have:
 - items: array of purchased food/grocery items
 
 Each item in the array must have:
-- name: string (full readable product name, expand abbreviations using the key below)
+- scanned_name: string (the original text exactly as it appears on the receipt, e.g. "SRBB VS BONE IN TH")
+- brand_name: string (fully expanded brand product name, e.g. "ShopRite Bowl & Basket Bone-In Chicken Thighs")
+- generic_name: string (the generic product name with no brand, e.g. "Bone-In Chicken Thighs" — used for recipe matching)
 - quantity: number (default 1 if not shown)
 - unit: string (count, lbs, oz, kg, etc.)
 - price: number or null (the net price after any discounts — see rules below)
@@ -125,7 +127,12 @@ IMPORTANT rules for discounts:
     }
 
     // Support both old array format and new object format
-    const items = Array.isArray(parsed) ? parsed : (parsed.items ?? [])
+    const rawItems = Array.isArray(parsed) ? parsed : (parsed.items ?? [])
+    // Normalise: map generic_name -> name for backward compat, keep brand_name + scanned_name
+    const items = rawItems.map((item: any) => ({
+      ...item,
+      name: item.generic_name ?? item.name,
+    }))
     const store_name = parsed.store_name ?? null
     const purchase_date = parsed.purchase_date ?? null
 
