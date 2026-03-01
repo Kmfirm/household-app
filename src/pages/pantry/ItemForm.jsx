@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import ConversionPrompt from '../../components/common/ConversionPrompt'
 
 const CATEGORIES = ['produce', 'dairy', 'meat', 'frozen', 'pantry', 'beverages', 'snacks', 'other']
 const LOCATIONS = ['pantry', 'fridge', 'freezer', 'counter', 'shelf', 'other']
@@ -16,7 +17,7 @@ const DEFAULTS = {
   purchase_price: '',
 }
 
-export default function ItemForm({ initial, onSave, onClose }) {
+export default function ItemForm({ initial, onSave, onClose, existingConversion, onConversionSave }) {
   const [form, setForm] = useState(initial ? {
     ...DEFAULTS,
     ...initial,
@@ -47,6 +48,10 @@ export default function ItemForm({ initial, onSave, onClose }) {
     }
     await onSave(payload)
     setLoading(false)
+  }
+
+  function handleConversionSave(count, countLabel) {
+    onConversionSave?.(form.name.trim(), form.quantity, form.unit, count, countLabel)
   }
 
   return (
@@ -98,6 +103,18 @@ export default function ItemForm({ initial, onSave, onClose }) {
               </select>
             </div>
           </div>
+
+          {/* Conversion prompt — shown for weight/volume units */}
+          {onConversionSave && (
+            <ConversionPrompt
+              itemName={form.name}
+              quantity={form.quantity}
+              unit={form.unit}
+              existingConversion={existingConversion}
+              onSave={handleConversionSave}
+              onSkip={() => {}}
+            />
+          )}
 
           {/* Category + Location */}
           <div className="flex gap-3">

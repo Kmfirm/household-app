@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { usePantry } from '../../hooks/usePantry'
 import { useHousehold } from '../../hooks/useHousehold'
+import { useUnitConversions } from '../../hooks/useUnitConversions'
 import ItemForm from './ItemForm'
 
 const CATEGORIES = ['produce', 'dairy', 'meat', 'frozen', 'pantry', 'beverages', 'snacks', 'other']
@@ -27,6 +28,7 @@ function expirationStatus(expDate) {
 export default function PantryPage() {
   const { household } = useHousehold()
   const { items, loading, addItem, updateItem, deleteItem } = usePantry(household?.id)
+  const { getConversion, upsertConversion } = useUnitConversions(household?.id)
   const [search, setSearch] = useState('')
   const [filterCategory, setFilterCategory] = useState('all')
   const [showForm, setShowForm] = useState(false)
@@ -162,6 +164,10 @@ export default function PantryPage() {
           initial={editItem}
           onSave={handleSave}
           onClose={() => { setShowForm(false); setEditItem(null) }}
+          existingConversion={editItem ? getConversion(editItem.name) : null}
+          onConversionSave={(name, qty, unit, count, label) =>
+            upsertConversion(name, qty, unit, count, label)
+          }
         />
       )}
     </div>

@@ -4,6 +4,8 @@ import { useHousehold } from '../../hooks/useHousehold'
 import { useAuth } from '../../context/AuthContext'
 import { usePantry } from '../../hooks/usePantry'
 import { useReceipts } from '../../hooks/useReceipts'
+import { useUnitConversions } from '../../hooks/useUnitConversions'
+import ConversionPrompt from '../../components/common/ConversionPrompt'
 
 const CATEGORIES = ['produce', 'dairy', 'meat', 'frozen', 'pantry', 'beverages', 'snacks', 'other']
 
@@ -22,6 +24,7 @@ export default function ReceiptPage() {
     deleteReceipt,
     getImageUrl,
   } = useReceipts(household?.id)
+  const { getConversion, upsertConversion } = useUnitConversions(household?.id)
 
   const fileRef = useRef()
 
@@ -474,6 +477,14 @@ export default function ReceiptPage() {
                       </div>
                     </div>
                   </div>
+                  <ConversionPrompt
+                    itemName={item.name}
+                    quantity={item.quantity}
+                    unit={item.unit}
+                    existingConversion={getConversion(item.name)}
+                    onSave={(count, label) => upsertConversion(item.name, item.quantity, item.unit, count, label)}
+                    onSkip={() => {}}
+                  />
                 </div>
               )
             })}

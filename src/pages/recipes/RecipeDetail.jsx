@@ -1,22 +1,61 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import CookRecipeModal from '../../components/common/CookRecipeModal'
 import { useLeftovers } from '../../hooks/useLeftovers'
 import { useHousehold } from '../../hooks/useHousehold'
+import { usePantry } from '../../hooks/usePantry'
+import { useUnitConversions } from '../../hooks/useUnitConversions'
+import { useShoppingList } from '../../hooks/useShoppingList'
+import { matchRecipeIngredients } from '../../hooks/useRecipeMatch'
+
+const STATUS_BADGE = {
+  have_enough: 'bg-green-100 text-green-700',
+  partial:     'bg-yellow-100 text-yellow-700',
+  missing:     'bg-red-100 text-red-600',
+  unknown:     'bg-gray-100 text-gray-500',
+}
 
 export default function RecipeDetail({ recipe, onEdit, onDelete, onBack, onRate }) {
   const { household } = useHousehold()
   const { cookRecipe } = useLeftovers(household?.id)
+  const { items: pantryItems } = usePantry(household?.id)
+  const { conversions } = useUnitConversions(household?.id)
+  const { addItem: addToShoppingList } = useShoppingList(household?.id)
   const [showCookModal, setShowCookModal] = useState(false)
   const [cookedToast, setCookedToast] = useState(null)
+  const [addedToList, setAddedToList] = useState(false)
+
+  const ingredientStatuses = useMemo(
+    () => matchRecipeIngredients(recipe.recipe_ingredients, pantryItems, conversions),
+    [recipe.recipe_ingredients, pantryItems, conversions]
+  )
+
+  const missingCount = ingredientStatuses.filter(
+    s => s.status === 'missing' || s.status === 'partial'
+  ).length
 
   async function handleCook(data) {
-    const { remaining } = await cookRecipe(data)
+    const { remaining } = await cookRecipe({ ...data, conversions })
     setCookedToast(
       remaining > 0
         ? `Cooked! ${remaining} serving${remaining !== 1 ? 's' : ''} saved as leftovers.`
         : 'Cooked! Pantry updated.'
     )
     setTimeout(() => setCookedToast(null), 3500)
+  }
+
+  async function handleAddMissingToList() {
+    const missing = ingredientStatuses.filter(s => s.status === 'missing' || s.status === 'partial')
+    for (const { ingredient } of missing) {
+      await addToShoppingList({
+        name: ingredient.name,
+        quantity: ingredient.quantity,
+        unit: ingredient.unit,
+        category: ingredient.category ?? 'other',
+        checked: false,
+      })
+    }
+    setAddedToList(true)
+    setTimeout(() => setAddedToList(false), 2500)
   }
 
   return (
@@ -65,13 +104,26 @@ export default function RecipeDetail({ recipe, onEdit, onDelete, onBack, onRate 
         {/* Ingredients */}
         {recipe.recipe_ingredients?.length > 0 && (
           <div className="mb-6">
-            <h2 className="text-sm font-semibold text-gray-700 mb-2">Ingredients</h2>
-            <ul className="flex flex-col gap-1">
-              {recipe.recipe_ingredients.map(ing => (
+            <div className="flex items-center justify-between mb-2">
+              <h2 className="text-sm font-semibold text-gray-700">Ingredients</h2>
+              {missingCount > 0 && (
+                <button
+                  onClick={handleAddMissingToList}
+                  className="text-xs text-blue-600 hover:text-blue-800 font-medium"
+                >
+                  {addedToList ? '✓ Added to list' : `+ Add ${missingCount} missing to shopping list`}
+                </button>
+              )}
+            </div>
+            <ul className="flex flex-col gap-1.5">
+              {ingredientStatuses.map(({ ingredient: ing, status }) => (
                 <li key={ing.id} className="flex items-center gap-2 text-sm text-gray-700">
                   <span className="w-1.5 h-1.5 rounded-full bg-green-500 shrink-0" />
                   <span className="font-medium">{ing.quantity} {ing.unit}</span>
                   <span>{ing.name}</span>
+                  <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ml-auto shrink-0 ${STATUS_BADGE[status]}`}>
+                    {status === 'have_enough' ? '✓' : status === 'partial' ? 'partial' : status === 'missing' ? 'missing' : '?'}
+                  </span>
                 </li>
               ))}
             </ul>
