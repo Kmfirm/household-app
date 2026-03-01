@@ -160,8 +160,7 @@ export default function ReceiptPage() {
       if (!uploadError) imagePath = path
     }
 
-    // Calculate total using net prices
-    const totalSpent = selected.reduce((sum, i) => sum + getNetPrice(i), 0)
+    const totalSpent = selected.reduce((sum, i) => sum + (parseFloat(i.price) || 0), 0)
 
     // Save receipt record
     const { data: receipt } = await supabase.from('receipts').insert({
@@ -184,7 +183,7 @@ export default function ReceiptPage() {
         category: item.category ?? 'other',
         storage_location: 'pantry',
         store_of_purchase: storeName || null,
-        purchase_price: getNetPrice(item),
+        purchase_price: parseFloat(item.price) || null,
         receipt_reference_id: receipt?.id ?? null,
       })
     }
@@ -461,16 +460,17 @@ export default function ReceiptPage() {
                         >
                           {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
                         </select>
-                        {listPrice > 0 && (
-                          isDiscounted ? (
-                            <span className="text-xs self-center">
-                              <span className="text-green-600 font-medium">${netPrice.toFixed(2)}</span>
-                              <span className="text-gray-400 line-through ml-1">${listPrice.toFixed(2)}</span>
-                            </span>
-                          ) : (
-                            <span className="text-xs text-gray-400 self-center">${listPrice.toFixed(2)}</span>
-                          )
-                        )}
+                        <div className="flex items-center gap-1 self-center">
+                          <span className="text-xs text-gray-400">$</span>
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={item.price ?? ''}
+                            onChange={e => updateItem(item.id, 'price', e.target.value)}
+                            className="w-16 border border-gray-200 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-green-400"
+                          />
+                        </div>
                       </div>
                     </div>
                   </div>
