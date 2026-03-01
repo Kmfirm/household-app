@@ -403,15 +403,15 @@ export default function ReceiptPage() {
 
       {/* REVIEW (create mode) */}
       {step === 'review' && (
-        <div>
-          <div className="flex items-center justify-between mb-3">
+        <div className="flex flex-col" style={{ maxHeight: 'calc(100vh - 10rem)', overflowY: 'auto' }}>
+          <div className="flex items-center justify-between mb-3 sticky top-0 bg-gray-50 py-1 z-10">
             <p className="text-sm text-gray-600">
               Found <strong>{items.length}</strong> items — uncheck any you don't want to add
             </p>
             <button onClick={() => setStep('upload')} className="text-xs text-gray-400 hover:text-gray-600">Start over</button>
           </div>
 
-          <div className="flex flex-col gap-2 mb-3 max-h-[45vh] overflow-y-auto">
+          <div className="flex flex-col gap-2 mb-3">
             {items.map(item => {
               const netPrice = getNetPrice(item)
               const listPrice = parseFloat(item.price) || 0
