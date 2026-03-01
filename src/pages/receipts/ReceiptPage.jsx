@@ -481,6 +481,7 @@ export default function ReceiptPage() {
                     itemName={item.name}
                     quantity={item.quantity}
                     unit={item.unit}
+                    price={item.price}
                     existingConversion={getConversion(item.name)}
                     onSave={(count, label) => upsertConversion(item.name, item.quantity, item.unit, count, label)}
                     onSkip={() => {}}

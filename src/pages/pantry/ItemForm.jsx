@@ -110,6 +110,7 @@ export default function ItemForm({ initial, onSave, onClose, existingConversion,
               itemName={form.name}
               quantity={form.quantity}
               unit={form.unit}
+              price={form.purchase_price}
               existingConversion={existingConversion}
               onSave={handleConversionSave}
               onSkip={() => {}}
