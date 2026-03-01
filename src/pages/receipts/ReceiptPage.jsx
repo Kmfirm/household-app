@@ -619,9 +619,17 @@ export default function ReceiptPage() {
                       >
                         {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
                       </select>
-                      {item.purchase_price != null && (
-                        <span className="text-xs text-gray-400 self-center">${item.purchase_price}</span>
-                      )}
+                      <div className="flex items-center gap-1 self-center">
+                        <span className="text-xs text-gray-400">$</span>
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={item.purchase_price ?? ''}
+                          onChange={e => updateEditItem(item.id, 'purchase_price', e.target.value)}
+                          className="w-16 border border-gray-200 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-green-400"
+                        />
+                      </div>
                     </div>
                   </div>
                   <button
