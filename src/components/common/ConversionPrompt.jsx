@@ -6,13 +6,15 @@ function guessCountLabel(itemName) {
   return words[words.length - 1] ?? 'piece'
 }
 
-// Inline prompt shown on weight/volume items asking the user how many pieces that is.
+// Inline prompt to capture piece↔weight conversion data.
+// For weight/volume units: asks "how many pieces is X lbs?"
+// For count units: asks "how many oz is 1 piece?"
 // Props:
-//   itemName        - string, e.g. "Chicken Thigh"
+//   itemName        - string, e.g. "Chicken Breast"
 //   quantity        - number
-//   unit            - string, e.g. "lbs"
+//   unit            - string, e.g. "lbs" or "count"
 //   existingConversion - object from unit_conversions or null
-//   onSave(count, countLabel) - called when user saves
+//   onSave(value, countLabel) - value is piece count (weight units) or oz/piece (count units)
 //   onSkip          - called when user skips (optional)
 export default function ConversionPrompt({ itemName, quantity, unit, existingConversion, onSave, onSkip }) {
   const [count, setCount] = useState('')
@@ -21,13 +23,19 @@ export default function ConversionPrompt({ itemName, quantity, unit, existingCon
   )
   const [saved, setSaved] = useState(false)
 
-  if (!CONVERTIBLE_UNITS.includes(unit?.toLowerCase())) return null
   if (saved) return null
   if (!itemName?.trim()) return null
 
-  const totalOz = toOz(parseFloat(quantity) || 0, unit)
+  const isCountUnit = !CONVERTIBLE_UNITS.includes(unit?.toLowerCase())
+
+  const totalOz = isCountUnit ? null : toOz(parseFloat(quantity) || 0, unit)
   const parsedCount = parseFloat(count)
-  const ozEach = parsedCount > 0 && totalOz ? totalOz / parsedCount : null
+
+  // For weight/volume: totalOz / pieces = oz each
+  // For count: the user directly enters oz per piece
+  const ozEach = isCountUnit
+    ? (parsedCount > 0 ? parsedCount : null)
+    : (parsedCount > 0 && totalOz ? totalOz / parsedCount : null)
 
   function handleSave() {
     if (!parsedCount || parsedCount <= 0) return
@@ -43,7 +51,9 @@ export default function ConversionPrompt({ itemName, quantity, unit, existingCon
   return (
     <div className="mt-2 bg-blue-50 border border-blue-200 rounded-lg p-2.5">
       <p className="text-xs text-blue-700 font-medium mb-1.5">
-        How many {countLabel}s is {quantity} {unit} of {itemName}?
+        {isCountUnit
+          ? `How many oz is 1 ${countLabel} of ${itemName}?`
+          : `How many ${countLabel}s is ${quantity} ${unit} of ${itemName}?`}
         {existingConversion && (
           <span className="text-blue-400 font-normal ml-1">
             (saved: ~{(existingConversion.oz_per_count).toFixed(1)} oz/{existingConversion.count_label})
@@ -53,11 +63,11 @@ export default function ConversionPrompt({ itemName, quantity, unit, existingCon
       <div className="flex gap-2 items-center flex-wrap">
         <input
           type="number"
-          min="1"
-          step="1"
+          min="0.1"
+          step="any"
           value={count}
           onChange={e => setCount(e.target.value)}
-          placeholder="qty"
+          placeholder={isCountUnit ? 'oz' : 'qty'}
           className="w-14 border border-blue-200 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-400 bg-white"
         />
         <input

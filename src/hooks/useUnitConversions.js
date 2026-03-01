@@ -59,10 +59,19 @@ export function useUnitConversions(householdId) {
   // count = how many pieces the user said that is (e.g. 8)
   // countLabel = what to call one piece (e.g. 'thigh')
   async function upsertConversion(ingredientName, totalQuantity, totalUnit, count, countLabel) {
-    const totalOz = toOz(parseFloat(totalQuantity), totalUnit)
-    if (!totalOz || !count || parseFloat(count) <= 0) return
+    const parsedCount = parseFloat(count)
+    if (!parsedCount || parsedCount <= 0) return
 
-    const ozPerCount = totalOz / parseFloat(count)
+    const isCountUnit = !CONVERTIBLE_UNITS.includes(totalUnit?.toLowerCase())
+    let ozPerCount
+    if (isCountUnit) {
+      // count unit: the 'count' param is already oz per piece (user entered directly)
+      ozPerCount = parsedCount
+    } else {
+      const totalOz = toOz(parseFloat(totalQuantity), totalUnit)
+      if (!totalOz) return
+      ozPerCount = totalOz / parsedCount
+    }
     const existing = getConversion(ingredientName)
 
     if (existing) {
