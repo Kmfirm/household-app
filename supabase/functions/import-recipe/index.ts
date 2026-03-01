@@ -96,14 +96,16 @@ ${lines.join('\n')}`,
   }
 }
 
+const JSON_HEADERS = { ...CORS, 'Content-Type': 'application/json' }
+const ok = (body: unknown) => new Response(JSON.stringify(body), { headers: JSON_HEADERS })
+const err = (msg: string) => new Response(JSON.stringify({ error: msg }), { headers: JSON_HEADERS })
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS })
 
   try {
     const { url } = await req.json()
-    if (!url || typeof url !== 'string') {
-      return new Response(JSON.stringify({ error: 'URL is required' }), { headers: CORS, status: 400 })
-    }
+    if (!url || typeof url !== 'string') return err('URL is required')
 
     // Fetch the page HTML
     let html = ''
@@ -118,30 +120,26 @@ serve(async (req) => {
       })
       html = await pageRes.text()
     } catch (fetchErr: any) {
-      return new Response(JSON.stringify({ error: `Could not fetch URL: ${fetchErr.message}` }), { headers: CORS, status: 422 })
+      return err(`Could not fetch URL: ${fetchErr.message}`)
     }
 
     const apiKey = Deno.env.get('ANTHROPIC_API_KEY')
-    if (!apiKey) {
-      return new Response(JSON.stringify({ error: 'API key not configured' }), { headers: CORS, status: 500 })
-    }
+    if (!apiKey) return err('API key not configured')
 
     // ── Path 1: JSON-LD structured data (works on JS-rendered sites) ──────────
     const jsonLd = extractJsonLd(html)
     if (jsonLd && jsonLd.name && jsonLd.recipeIngredient?.length) {
       const ingredients = await parseIngredientStrings(jsonLd.recipeIngredient, apiKey)
 
-      const recipe = {
-        name: String(jsonLd.name).trim(),
-        total_servings: parseYield(jsonLd.recipeYield),
-        instructions: formatInstructions(jsonLd.recipeInstructions),
-        notes: jsonLd.description ? String(jsonLd.description).trim() : null,
-        source_url: url,
-        ingredients,
-      }
-
-      return new Response(JSON.stringify({ recipe }), {
-        headers: { ...CORS, 'Content-Type': 'application/json' },
+      return ok({
+        recipe: {
+          name: String(jsonLd.name).trim(),
+          total_servings: parseYield(jsonLd.recipeYield),
+          instructions: formatInstructions(jsonLd.recipeInstructions),
+          notes: jsonLd.description ? String(jsonLd.description).trim() : null,
+          source_url: url,
+          ingredients,
+        }
       })
     }
 
@@ -160,10 +158,7 @@ serve(async (req) => {
       .slice(0, 18000)
 
     if (text.length < 200) {
-      return new Response(
-        JSON.stringify({ error: 'Could not read page content. The site may require JavaScript to load. Try copying the recipe URL directly from your browser.' }),
-        { headers: CORS, status: 422 }
-      )
+      return err('Could not read page content. The site may require JavaScript to load. Try copying the recipe URL directly from your browser.')
     }
 
     const claudeRes = await fetch('https://api.anthropic.com/v1/messages', {
@@ -202,8 +197,8 @@ ${text}`,
     })
 
     if (!claudeRes.ok) {
-      const err = await claudeRes.text()
-      return new Response(JSON.stringify({ error: `AI parsing failed: ${err}` }), { headers: CORS, status: 502 })
+      const errText = await claudeRes.text()
+      return err(`AI parsing failed: ${errText}`)
     }
 
     const claudeData = await claudeRes.json()
@@ -214,10 +209,7 @@ ${text}`,
       const jsonMatch = raw.match(/\{[\s\S]*\}/)
       recipe = JSON.parse(jsonMatch?.[0] ?? raw)
     } catch {
-      return new Response(
-        JSON.stringify({ error: 'Could not parse recipe from page. Try a different recipe site.' }),
-        { headers: CORS, status: 422 }
-      )
+      return err('Could not parse recipe from page. Try a different recipe site.')
     }
 
     recipe.ingredients = (recipe.ingredients ?? []).map((ing: any) => ({
@@ -228,11 +220,9 @@ ${text}`,
     recipe.source_url = url
     recipe.total_servings = Number(recipe.total_servings) || 4
 
-    return new Response(JSON.stringify({ recipe }), {
-      headers: { ...CORS, 'Content-Type': 'application/json' },
-    })
+    return ok({ recipe })
 
-  } catch (err: any) {
-    return new Response(JSON.stringify({ error: err.message }), { headers: CORS, status: 500 })
+  } catch (e: any) {
+    return err(e.message ?? 'Unexpected error')
   }
 })
