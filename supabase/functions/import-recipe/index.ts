@@ -141,20 +141,42 @@ serve(async (req) => {
     const { url } = await req.json()
     if (!url || typeof url !== 'string') return err('URL is required')
 
-    // Fetch the page HTML
+    // Fetch the page HTML with full browser headers to avoid bot detection
     let html = ''
     try {
       const pageRes = await fetch(url, {
         headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
           'Accept-Language': 'en-US,en;q=0.9',
+          'Accept-Encoding': 'gzip, deflate, br',
+          'Sec-Ch-Ua': '"Not A(Brand";v="99", "Google Chrome";v="121", "Chromium";v="121"',
+          'Sec-Ch-Ua-Mobile': '?0',
+          'Sec-Ch-Ua-Platform': '"Windows"',
+          'Sec-Fetch-Dest': 'document',
+          'Sec-Fetch-Mode': 'navigate',
+          'Sec-Fetch-Site': 'none',
+          'Sec-Fetch-User': '?1',
+          'Upgrade-Insecure-Requests': '1',
+          'Cache-Control': 'no-cache',
         },
-        signal: AbortSignal.timeout(10000),
+        signal: AbortSignal.timeout(15000),
       })
       html = await pageRes.text()
+      console.log(`Fetched ${url} — status ${pageRes.status}, html length ${html.length}`)
     } catch (fetchErr: any) {
       return err(`Could not fetch URL: ${fetchErr.message}`)
+    }
+
+    // Detect bot-challenge pages (Cloudflare, etc.)
+    if (
+      html.includes('cf-chl-widget') ||
+      html.includes('challenge-platform') ||
+      html.includes('Checking your browser') ||
+      html.includes('DDoS protection by Cloudflare') ||
+      (html.length < 5000 && html.includes('Just a moment'))
+    ) {
+      return err('This site uses bot protection that blocked the import. Try a different recipe site such as AllRecipes, Food52, or Simply Recipes.')
     }
 
     const apiKey = Deno.env.get('ANTHROPIC_API_KEY')
@@ -162,6 +184,7 @@ serve(async (req) => {
 
     // ── Path 1: JSON-LD structured data (works on JS-rendered sites) ──────────
     const jsonLd = extractJsonLd(html)
+    console.log(`JSON-LD found: ${!!jsonLd}, name: ${jsonLd?.name ?? 'none'}, ingredients: ${jsonLd?.recipeIngredient?.length ?? 0}`)
     if (jsonLd && jsonLd.name && jsonLd.recipeIngredient?.length) {
       const ingredients = await parseIngredientStrings(jsonLd.recipeIngredient, apiKey)
 
