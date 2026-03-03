@@ -41,7 +41,7 @@ export function useMealPlan(householdId, weekStart) {
     setLoading(false)
   }
 
-  async function addMeal({ date, recipe_id, meal_type, servings }) {
+  async function addMeal({ date, recipe_id, meal_type, scale }) {
     const { error } = await supabase
       .from('meal_plans')
       .insert({
@@ -50,8 +50,14 @@ export function useMealPlan(householdId, weekStart) {
         date: toDateStr(date),
         recipe_id,
         meal_type,
-        servings,
+        scale: scale ?? 1,
       })
+    return { error }
+  }
+
+  async function updateMeal(id, updates) {
+    const { error } = await supabase.from('meal_plans').update(updates).eq('id', id)
+    if (!error) setPlans(prev => prev.map(p => p.id === id ? { ...p, ...updates } : p))
     return { error }
   }
 
@@ -60,7 +66,7 @@ export function useMealPlan(householdId, weekStart) {
     return { error }
   }
 
-  return { plans, loading, addMeal, removeMeal }
+  return { plans, loading, addMeal, updateMeal, removeMeal }
 }
 
 export function toDateStr(date) {

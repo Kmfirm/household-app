@@ -3,6 +3,7 @@ import { useHousehold } from '../../hooks/useHousehold'
 import { useRecipes } from '../../hooks/useRecipes'
 import { usePantry } from '../../hooks/usePantry'
 import { useMealPlan, getWeekStart, toDateStr } from '../../hooks/useMealPlan'
+import { useShoppingList } from '../../hooks/useShoppingList'
 import AssignMealModal from './AssignMealModal'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
@@ -12,6 +13,11 @@ const MEAL_COLORS = {
   lunch: 'bg-blue-50 border-blue-200 text-blue-800',
   dinner: 'bg-green-50 border-green-200 text-green-800',
   snack: 'bg-purple-50 border-purple-200 text-purple-800',
+}
+
+function scaleLabel(scale) {
+  if (scale === 0.5) return '½x'
+  return `${scale ?? 1}x`
 }
 
 function getPantryGaps(recipe, pantryItems) {
@@ -30,16 +36,34 @@ export default function CalendarPage() {
   const { recipes } = useRecipes(household?.id)
   const { items: pantryItems } = usePantry(household?.id)
   const [weekStart, setWeekStart] = useState(getWeekStart())
-  const { plans, loading, addMeal, removeMeal } = useMealPlan(household?.id, weekStart)
-  const [assignDay, setAssignDay] = useState(null) // date object
+  const { plans, loading, addMeal, updateMeal, removeMeal } = useMealPlan(household?.id, weekStart)
+  const { addItem: addToShoppingList } = useShoppingList(household?.id)
+  const [assignDay, setAssignDay] = useState(null)
   const [confirmedIngredients, setConfirmedIngredients] = useState(new Set())
+  const [addingToList, setAddingToList] = useState(new Set())
 
   function confirmIngredient(name) {
     setConfirmedIngredients(prev => new Set([...prev, name.toLowerCase()]))
   }
 
-  function confirmAll(gaps) {
-    setConfirmedIngredients(prev => new Set([...prev, ...gaps.map(g => g.name.toLowerCase())]))
+  async function addIngredientToList(ingredient, scale) {
+    const key = ingredient.name.toLowerCase()
+    setAddingToList(prev => new Set([...prev, key]))
+    await addToShoppingList({
+      name: ingredient.name,
+      quantity: Math.round(ingredient.quantity * (scale ?? 1) * 100) / 100,
+      unit: ingredient.unit,
+      category: ingredient.category ?? 'other',
+      checked: false,
+    })
+    setAddingToList(prev => { const s = new Set(prev); s.delete(key); return s })
+    confirmIngredient(ingredient.name)
+  }
+
+  async function addAllMissingToList(gaps, scale) {
+    for (const gap of gaps) {
+      await addIngredientToList(gap, scale)
+    }
   }
 
   const days = Array.from({ length: 7 }, (_, i) => {
@@ -129,57 +153,89 @@ export default function CalendarPage() {
                 ) : (
                   <div className="flex flex-col gap-1.5">
                     {dayPlans.map(plan => {
+                      const scale = plan.scale ?? 1
+                      const totalServings = plan.recipes?.total_servings
+                        ? Math.round(plan.recipes.total_servings * scale * 10) / 10
+                        : null
                       const gaps = getPantryGaps(plan.recipes, pantryItems)
                       const unconfirmed = gaps.filter(g => !confirmedIngredients.has(g.name.toLowerCase()))
+
                       return (
                         <div
                           key={plan.id}
-                          className={`rounded-lg border px-3 py-2 ${MEAL_COLORS[plan.meal_type]}`}
+                          className={`rounded-lg border px-3 py-2 transition-opacity ${MEAL_COLORS[plan.meal_type]} ${plan.cooked ? 'opacity-50' : ''}`}
                         >
-                          <div className="flex items-center justify-between">
+                          {/* Meal header */}
+                          <div className="flex items-start justify-between gap-2">
                             <div className="flex-1 min-w-0">
-                              <div className="flex items-center gap-2">
+                              <div className="flex items-center gap-2 flex-wrap">
                                 <span className="text-xs font-medium capitalize">{plan.meal_type}</span>
-                                <span className="text-xs font-semibold truncate">{plan.recipes?.name}</span>
+                                <span className={`text-xs font-semibold truncate ${plan.cooked ? 'line-through opacity-60' : ''}`}>
+                                  {plan.recipes?.name}
+                                </span>
                               </div>
-                              <span className="text-xs opacity-70">{plan.servings} serving{plan.servings !== 1 ? 's' : ''}</span>
+                              <span className="text-xs opacity-60">
+                                {scaleLabel(scale)}{totalServings !== null ? ` · ${totalServings} serving${totalServings !== 1 ? 's' : ''}` : ''}
+                              </span>
                             </div>
-                            <button
-                              onClick={() => removeMeal(plan.id)}
-                              className="text-xs opacity-50 hover:opacity-100 ml-2 shrink-0"
-                            >
-                              ✕
-                            </button>
+                            <div className="flex items-center gap-1 shrink-0">
+                              <button
+                                onClick={() => updateMeal(plan.id, { cooked: !plan.cooked })}
+                                className={`text-xs px-2 py-1 rounded-lg border font-medium transition-colors ${
+                                  plan.cooked
+                                    ? 'bg-green-600 text-white border-green-600'
+                                    : 'bg-white/60 border-current/30 opacity-70 hover:opacity-100'
+                                }`}
+                              >
+                                {plan.cooked ? '✓ Cooked' : 'Mark cooked'}
+                              </button>
+                              <button
+                                onClick={() => removeMeal(plan.id)}
+                                className="text-xs opacity-40 hover:opacity-80 ml-1"
+                              >
+                                ✕
+                              </button>
+                            </div>
                           </div>
 
                           {/* Missing ingredients */}
-                          {unconfirmed.length > 0 && (
-                            <div className="mt-2 flex flex-wrap gap-1 items-center">
-                              <span className="text-xs text-red-500 font-medium mr-1">Need:</span>
-                              {unconfirmed.map(gap => (
+                          {!plan.cooked && unconfirmed.length > 0 && (
+                            <div className="mt-2 pt-2 border-t border-current/10">
+                              <div className="flex items-center justify-between mb-1.5">
+                                <span className="text-xs font-medium opacity-70">Missing</span>
                                 <button
-                                  key={gap.name}
-                                  onClick={() => confirmIngredient(gap.name)}
-                                  title="Tap to mark as 'I have this'"
-                                  className="text-xs bg-white/70 border border-red-200 text-red-600 rounded-full px-2 py-0.5 hover:bg-green-50 hover:border-green-300 hover:text-green-700 transition-colors"
+                                  onClick={() => addAllMissingToList(unconfirmed, scale)}
+                                  className="text-xs underline opacity-60 hover:opacity-100"
                                 >
-                                  {gap.name}
+                                  + Add all to shopping list
                                 </button>
-                              ))}
-                              {unconfirmed.length > 1 && (
-                                <button
-                                  onClick={() => confirmAll(unconfirmed)}
-                                  className="text-xs text-gray-400 hover:text-green-600 underline ml-1"
-                                >
-                                  I have all
-                                </button>
-                              )}
+                              </div>
+                              <div className="flex flex-col gap-1">
+                                {unconfirmed.map(gap => (
+                                  <div key={gap.name} className="flex items-center gap-2">
+                                    <span className="text-xs flex-1 truncate">{gap.name}</span>
+                                    <button
+                                      onClick={() => confirmIngredient(gap.name)}
+                                      className="text-xs bg-white/70 border border-current/20 rounded px-1.5 py-0.5 hover:bg-green-50 hover:border-green-400 hover:text-green-700 transition-colors whitespace-nowrap"
+                                    >
+                                      ✓ Have it
+                                    </button>
+                                    <button
+                                      onClick={() => addIngredientToList(gap, scale)}
+                                      disabled={addingToList.has(gap.name.toLowerCase())}
+                                      className="text-xs bg-white/70 border border-current/20 rounded px-1.5 py-0.5 hover:bg-blue-50 hover:border-blue-400 hover:text-blue-700 transition-colors whitespace-nowrap disabled:opacity-40"
+                                    >
+                                      + List
+                                    </button>
+                                  </div>
+                                ))}
+                              </div>
                             </div>
                           )}
 
-                          {/* All gaps confirmed */}
-                          {gaps.length > 0 && unconfirmed.length === 0 && (
-                            <p className="text-xs text-green-600 mt-1 font-medium">✓ All ingredients covered</p>
+                          {/* All covered */}
+                          {!plan.cooked && gaps.length > 0 && unconfirmed.length === 0 && (
+                            <p className="text-xs text-green-600 mt-1.5 font-medium">✓ All ingredients covered</p>
                           )}
                         </div>
                       )

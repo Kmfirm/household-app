@@ -1,12 +1,18 @@
 import { useState } from 'react'
 
 const MEAL_TYPES = ['breakfast', 'lunch', 'dinner', 'snack']
+const SCALES = [0.5, 1, 2]
 
 export default function AssignMealModal({ date, recipes, onSave, onClose }) {
   const [recipeId, setRecipeId] = useState('')
   const [mealType, setMealType] = useState('dinner')
-  const [servings, setServings] = useState(2)
+  const [scale, setScale] = useState(1)
   const [loading, setLoading] = useState(false)
+
+  const selectedRecipe = recipes.find(r => r.id === recipeId)
+  const scaledServings = selectedRecipe
+    ? Math.round(selectedRecipe.total_servings * scale * 10) / 10
+    : null
 
   const dateLabel = date.toLocaleDateString('en-US', {
     weekday: 'long', month: 'long', day: 'numeric',
@@ -16,7 +22,7 @@ export default function AssignMealModal({ date, recipes, onSave, onClose }) {
     e.preventDefault()
     if (!recipeId) return
     setLoading(true)
-    await onSave({ recipe_id: recipeId, meal_type: mealType, servings: Number(servings) })
+    await onSave({ recipe_id: recipeId, meal_type: mealType, scale })
     setLoading(false)
   }
 
@@ -67,16 +73,30 @@ export default function AssignMealModal({ date, recipes, onSave, onClose }) {
             </div>
           </div>
 
-          {/* Servings */}
+          {/* Scale */}
           <div>
-            <label className="text-xs font-medium text-gray-600 mb-1 block">Servings</label>
-            <input
-              type="number"
-              min="1"
-              value={servings}
-              onChange={e => setServings(e.target.value)}
-              className="w-24 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-400"
-            />
+            <label className="text-xs font-medium text-gray-600 mb-1 block">Scale</label>
+            <div className="flex gap-2">
+              {SCALES.map(s => (
+                <button
+                  key={s}
+                  type="button"
+                  onClick={() => setScale(s)}
+                  className={`flex-1 py-2 rounded-lg text-sm font-semibold border transition-colors ${
+                    scale === s
+                      ? 'bg-green-600 text-white border-green-600'
+                      : 'border-gray-300 text-gray-600 hover:bg-gray-50'
+                  }`}
+                >
+                  {s === 0.5 ? '½x' : `${s}x`}
+                </button>
+              ))}
+            </div>
+            {scaledServings !== null && (
+              <p className="text-xs text-gray-400 mt-1.5">
+                = {scaledServings} serving{scaledServings !== 1 ? 's' : ''}
+              </p>
+            )}
           </div>
 
           <div className="flex gap-3 pt-1">
