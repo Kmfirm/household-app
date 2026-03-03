@@ -24,9 +24,10 @@ export default function RecipesPage() {
   const [editRecipe, setEditRecipe] = useState(null)
   const [viewRecipe, setViewRecipe] = useState(null)
 
-  // URL import state
+  // Paste import state
   const [showImport, setShowImport] = useState(false)
-  const [importUrl, setImportUrl] = useState('')
+  const [importUrl, setImportUrl] = useState('')       // reused as paste text
+  const [importSourceUrl, setImportSourceUrl] = useState('')
   const [importing, setImporting] = useState(false)
   const [importError, setImportError] = useState('')
 
@@ -71,25 +72,24 @@ export default function RecipesPage() {
     setImportError('')
 
     const { data, error } = await supabase.functions.invoke('import-recipe', {
-      body: { url: importUrl.trim() },
+      body: { text: importUrl.trim(), source_url: importSourceUrl.trim() || null },
     })
 
     setImporting(false)
 
     if (error || data?.error) {
-      setImportError(data?.error ?? error?.message ?? 'Import failed. Try a different URL.')
+      setImportError(data?.error ?? error?.message ?? 'Import failed.')
       return
     }
 
     const r = data.recipe
-    // Map to RecipeForm's initial shape
     const imported = {
       name: r.name ?? '',
       total_servings: r.total_servings ?? 4,
       instructions: r.instructions ?? '',
       notes: r.notes ?? '',
       rating: null,
-      source_url: r.source_url ?? importUrl.trim(),
+      source_url: r.source_url ?? importSourceUrl.trim() ?? null,
       recipe_ingredients: (r.ingredients ?? []).map(ing => ({
         name: ing.name,
         quantity: ing.quantity,
@@ -100,6 +100,7 @@ export default function RecipesPage() {
 
     setShowImport(false)
     setImportUrl('')
+    setImportSourceUrl('')
     setEditRecipe(imported)
     setShowForm(true)
   }
@@ -126,7 +127,7 @@ export default function RecipesPage() {
             onClick={() => { setImportError(''); setShowImport(true) }}
             className="border border-gray-300 text-gray-600 text-sm px-3 py-2 rounded-lg hover:bg-gray-50"
           >
-            Import URL
+            Import Recipe
           </button>
           <button
             onClick={() => { setEditRecipe(null); setShowForm(true) }}
@@ -204,36 +205,44 @@ export default function RecipesPage() {
         />
       )}
 
-      {/* Import URL modal */}
+      {/* Paste import modal */}
       {showImport && (
         <div className="fixed inset-0 bg-black/40 flex items-end md:items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl w-full max-w-sm p-6">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-base font-semibold text-gray-800">Import recipe from URL</h2>
-              <button onClick={() => setShowImport(false)} className="text-gray-400 hover:text-gray-600 text-xl leading-none">✕</button>
+          <div className="bg-white rounded-2xl w-full max-w-lg p-6">
+            <div className="flex items-center justify-between mb-2">
+              <h2 className="text-base font-semibold text-gray-800">Import recipe from text</h2>
+              <button onClick={() => { setShowImport(false); setImportUrl(''); setImportSourceUrl(''); setImportError('') }}
+                className="text-gray-400 hover:text-gray-600 text-xl leading-none">✕</button>
             </div>
             <p className="text-xs text-gray-500 mb-4">
-              Paste the link to any recipe page. Ingredients and instructions will be extracted automatically.
+              Open the recipe in your browser, select all the text, copy it, and paste it below.
             </p>
             <form onSubmit={handleImport} className="flex flex-col gap-3">
-              <input
+              <textarea
                 autoFocus
-                type="url"
+                required
                 value={importUrl}
                 onChange={e => setImportUrl(e.target.value)}
-                placeholder="https://www.allrecipes.com/recipe/..."
-                required
+                placeholder="Paste recipe text here — ingredients, instructions, everything..."
+                rows={10}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-400 resize-none"
+              />
+              <input
+                type="url"
+                value={importSourceUrl}
+                onChange={e => setImportSourceUrl(e.target.value)}
+                placeholder="Source URL (optional)"
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-400"
               />
               {importError && (
                 <p className="text-xs text-red-500">{importError}</p>
               )}
               <div className="flex gap-2">
-                <button type="button" onClick={() => setShowImport(false)}
+                <button type="button" onClick={() => { setShowImport(false); setImportUrl(''); setImportSourceUrl(''); setImportError('') }}
                   className="flex-1 border border-gray-300 text-gray-600 rounded-lg py-2 text-sm">
                   Cancel
                 </button>
-                <button type="submit" disabled={importing}
+                <button type="submit" disabled={importing || !importUrl.trim()}
                   className="flex-1 bg-green-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-green-700 disabled:opacity-50">
                   {importing ? 'Importing...' : 'Import'}
                 </button>
