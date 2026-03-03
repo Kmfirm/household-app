@@ -7,6 +7,15 @@ import { useUnitConversions } from '../../hooks/useUnitConversions'
 import { useShoppingList } from '../../hooks/useShoppingList'
 import { matchRecipeIngredients } from '../../hooks/useRecipeMatch'
 
+function parseSteps(text) {
+  if (!text?.trim()) return []
+  const lines = text.split(/\n+/).map(s => s.trim()).filter(Boolean)
+  if (lines.length > 1) return lines
+  const inline = text.split(/(?=\b\d+\.\s)/).map(s => s.trim()).filter(Boolean)
+  if (inline.length > 1) return inline
+  return [text]
+}
+
 const STATUS_BADGE = {
   have_enough: 'bg-green-100 text-green-700',
   partial:     'bg-yellow-100 text-yellow-700',
@@ -86,9 +95,15 @@ export default function RecipeDetail({ recipe, onEdit, onDelete, onBack, onRate 
           </div>
         </div>
 
-        <p className="text-sm text-gray-500 mb-4">
+        <p className="text-sm text-gray-500 mb-1">
           {recipe.total_servings} serving{recipe.total_servings !== 1 ? 's' : ''}
         </p>
+
+        {(recipe.book_title || recipe.book_page) && (
+          <p className="text-xs text-gray-400 mb-4">
+            📖 {recipe.book_title}{recipe.book_page ? `, p. ${recipe.book_page}` : ''}
+          </p>
+        )}
 
         {/* Rating */}
         <div className="flex items-center gap-2 mb-6">
@@ -131,9 +146,20 @@ export default function RecipeDetail({ recipe, onEdit, onDelete, onBack, onRate 
         )}
 
         {recipe.instructions && (
-          <div className="mb-4">
-            <h2 className="text-sm font-semibold text-gray-700 mb-2">Instructions</h2>
-            <p className="text-sm text-gray-600 whitespace-pre-wrap leading-relaxed">{recipe.instructions}</p>
+          <div className="mb-6">
+            <h2 className="text-sm font-semibold text-gray-700 mb-3">Instructions</h2>
+            <ol className="flex flex-col gap-4">
+              {parseSteps(recipe.instructions).map((step, i) => (
+                <li key={i} className="flex gap-3">
+                  <span className="shrink-0 w-6 h-6 rounded-full bg-green-100 text-green-700 text-xs font-bold flex items-center justify-center mt-0.5">
+                    {i + 1}
+                  </span>
+                  <p className="text-sm text-gray-600 leading-relaxed flex-1">
+                    {step.replace(/^\d+\.\s*/, '')}
+                  </p>
+                </li>
+              ))}
+            </ol>
           </div>
         )}
 

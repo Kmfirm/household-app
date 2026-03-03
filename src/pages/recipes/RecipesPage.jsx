@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useRef } from 'react'
 import { useRecipes } from '../../hooks/useRecipes'
 import { useHousehold } from '../../hooks/useHousehold'
 import { usePantry } from '../../hooks/usePantry'
@@ -26,10 +26,20 @@ export default function RecipesPage() {
 
   // Paste import state
   const [showImport, setShowImport] = useState(false)
-  const [importUrl, setImportUrl] = useState('')       // reused as paste text
+  const [importUrl, setImportUrl] = useState('')
   const [importSourceUrl, setImportSourceUrl] = useState('')
   const [importing, setImporting] = useState(false)
   const [importError, setImportError] = useState('')
+
+  // Cookbook photo scan state
+  const [showCookbook, setShowCookbook] = useState(false)
+  const [cookbookFile, setCookbookFile] = useState(null)
+  const [cookbookPreview, setCookbookPreview] = useState(null)
+  const [cookbookBookTitle, setCookbookBookTitle] = useState('')
+  const [cookbookPage, setCookbookPage] = useState('')
+  const [scanningCookbook, setScanningCookbook] = useState(false)
+  const [cookbookError, setCookbookError] = useState('')
+  const cookbookFileRef = useRef()
 
   // Compute recently used ingredients sorted by frequency across all recipes
   const allIngredients = useMemo(() => {
@@ -63,6 +73,88 @@ export default function RecipesPage() {
       await deleteRecipe(id)
       setViewRecipe(null)
     }
+  }
+
+  async function compressImage(file) {
+    return new Promise((resolve) => {
+      const img = new Image()
+      const url = URL.createObjectURL(file)
+      img.onload = () => {
+        URL.revokeObjectURL(url)
+        const MAX = 2048
+        const MAX_BYTES = 4 * 1024 * 1024
+        let { width, height } = img
+        if (width > MAX || height > MAX) {
+          const ratio = Math.min(MAX / width, MAX / height)
+          width = Math.round(width * ratio)
+          height = Math.round(height * ratio)
+        }
+        const canvas = document.createElement('canvas')
+        canvas.width = width
+        canvas.height = height
+        canvas.getContext('2d').drawImage(img, 0, 0, width, height)
+        let quality = 0.85
+        let dataUrl = canvas.toDataURL('image/jpeg', quality)
+        while (dataUrl.length * 0.75 > MAX_BYTES && quality > 0.3) {
+          quality -= 0.1
+          dataUrl = canvas.toDataURL('image/jpeg', quality)
+        }
+        resolve(dataUrl.split(',')[1])
+      }
+      img.src = url
+    })
+  }
+
+  function handleCookbookFileChange(e) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setCookbookFile(file)
+    setCookbookPreview(URL.createObjectURL(file))
+  }
+
+  async function handleCookbookScan(e) {
+    e.preventDefault()
+    if (!cookbookFile) return
+    setScanningCookbook(true)
+    setCookbookError('')
+
+    const base64 = await compressImage(cookbookFile)
+    const { data, error } = await supabase.functions.invoke('import-recipe', {
+      body: { imageBase64: base64, mimeType: 'image/jpeg' },
+    })
+
+    setScanningCookbook(false)
+
+    if (error || data?.error) {
+      setCookbookError(data?.error ?? error?.message ?? 'Scan failed')
+      return
+    }
+
+    const r = data.recipe
+    const imported = {
+      name: r.name ?? '',
+      total_servings: r.total_servings ?? 4,
+      instructions: r.instructions ?? '',
+      notes: r.notes ?? '',
+      rating: null,
+      source_url: null,
+      book_title: cookbookBookTitle.trim() || null,
+      book_page: cookbookPage.trim() || null,
+      recipe_ingredients: (r.ingredients ?? []).map(ing => ({
+        name: ing.name,
+        quantity: ing.quantity,
+        unit: ing.unit,
+        category: 'other',
+      })),
+    }
+
+    setShowCookbook(false)
+    setCookbookFile(null)
+    setCookbookPreview(null)
+    setCookbookBookTitle('')
+    setCookbookPage('')
+    setEditRecipe(imported)
+    setShowForm(true)
   }
 
   async function handleImport(e) {
@@ -123,6 +215,12 @@ export default function RecipesPage() {
       <div className="flex items-center justify-between mb-4">
         <h1 className="text-xl font-bold text-gray-800">Recipes</h1>
         <div className="flex gap-2">
+          <button
+            onClick={() => { setCookbookError(''); setShowCookbook(true) }}
+            className="border border-gray-300 text-gray-600 text-sm px-3 py-2 rounded-lg hover:bg-gray-50"
+          >
+            📷 Cookbook
+          </button>
           <button
             onClick={() => { setImportError(''); setShowImport(true) }}
             className="border border-gray-300 text-gray-600 text-sm px-3 py-2 rounded-lg hover:bg-gray-50"
@@ -203,6 +301,82 @@ export default function RecipesPage() {
           pantryItems={pantryItems}
           allIngredients={allIngredients}
         />
+      )}
+
+      {/* Cookbook scan modal */}
+      {showCookbook && (
+        <div className="fixed inset-0 bg-black/40 flex items-end md:items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl w-full max-w-lg p-6">
+            <div className="flex items-center justify-between mb-2">
+              <h2 className="text-base font-semibold text-gray-800">Import from cookbook photo</h2>
+              <button onClick={() => { setShowCookbook(false); setCookbookFile(null); setCookbookPreview(null); setCookbookBookTitle(''); setCookbookPage(''); setCookbookError('') }}
+                className="text-gray-400 hover:text-gray-600 text-xl leading-none">✕</button>
+            </div>
+            <p className="text-xs text-gray-500 mb-4">
+              Take a photo of a cookbook page or upload an image. The recipe will be extracted automatically.
+            </p>
+            <form onSubmit={handleCookbookScan} className="flex flex-col gap-3">
+              {cookbookPreview ? (
+                <div className="relative">
+                  <img src={cookbookPreview} alt="Cookbook page" className="w-full max-h-56 object-contain rounded-xl border border-gray-200" />
+                  <button
+                    type="button"
+                    onClick={() => { setCookbookFile(null); setCookbookPreview(null); cookbookFileRef.current.value = '' }}
+                    className="absolute top-2 right-2 bg-black/50 text-white text-xs px-2 py-1 rounded-lg"
+                  >
+                    Change
+                  </button>
+                </div>
+              ) : (
+                <label className="flex flex-col items-center justify-center gap-2 border-2 border-dashed border-gray-300 rounded-xl py-8 cursor-pointer hover:border-green-400 hover:bg-green-50 transition-colors">
+                  <span className="text-3xl">📷</span>
+                  <span className="text-sm text-gray-500">Tap to take photo or choose image</span>
+                  <input
+                    ref={cookbookFileRef}
+                    type="file"
+                    accept="image/*"
+                    capture="environment"
+                    onChange={handleCookbookFileChange}
+                    className="hidden"
+                  />
+                </label>
+              )}
+              <div className="flex gap-3">
+                <div className="flex-1">
+                  <label className="text-xs font-medium text-gray-600 mb-1 block">Book title <span className="text-gray-400">(optional)</span></label>
+                  <input
+                    value={cookbookBookTitle}
+                    onChange={e => setCookbookBookTitle(e.target.value)}
+                    placeholder="e.g. Salt, Fat, Acid, Heat"
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-400"
+                  />
+                </div>
+                <div className="w-24">
+                  <label className="text-xs font-medium text-gray-600 mb-1 block">Page <span className="text-gray-400">(opt)</span></label>
+                  <input
+                    value={cookbookPage}
+                    onChange={e => setCookbookPage(e.target.value)}
+                    placeholder="42"
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-400"
+                  />
+                </div>
+              </div>
+              {cookbookError && (
+                <p className="text-xs text-red-500">{cookbookError}</p>
+              )}
+              <div className="flex gap-2">
+                <button type="button" onClick={() => { setShowCookbook(false); setCookbookFile(null); setCookbookPreview(null); setCookbookBookTitle(''); setCookbookPage(''); setCookbookError('') }}
+                  className="flex-1 border border-gray-300 text-gray-600 rounded-lg py-2 text-sm">
+                  Cancel
+                </button>
+                <button type="submit" disabled={scanningCookbook || !cookbookFile}
+                  className="flex-1 bg-green-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-green-700 disabled:opacity-50">
+                  {scanningCookbook ? 'Scanning...' : 'Scan Recipe'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
       )}
 
       {/* Paste import modal */}

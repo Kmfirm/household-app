@@ -12,6 +12,8 @@ const DEFAULTS = {
   notes: '',
   rating: null,
   source_url: '',
+  book_title: '',
+  book_page: '',
   ingredients: [{ ...EMPTY_INGREDIENT }],
 }
 
@@ -25,6 +27,8 @@ export default function RecipeForm({ initial, onSave, onClose, pantryItems = [],
     notes: initial.notes ?? '',
     rating: initial.rating ?? null,
     source_url: initial.source_url ?? '',
+    book_title: initial.book_title ?? '',
+    book_page: initial.book_page ?? '',
     ingredients: initial.recipe_ingredients?.length
       ? initial.recipe_ingredients.map(({ id, recipe_id, ...i }) => i)
       : [{ ...EMPTY_INGREDIENT }],
@@ -96,6 +100,8 @@ export default function RecipeForm({ initial, onSave, onClose, pantryItems = [],
       notes: form.notes.trim() || null,
       rating: form.rating,
       source_url: form.source_url.trim() || null,
+      book_title: form.book_title.trim() || null,
+      book_page: form.book_page.trim() || null,
       ingredients: form.ingredients
         .filter(i => i.name.trim())
         .map(i => ({ ...i, quantity: Number(i.quantity) })),
@@ -249,6 +255,32 @@ export default function RecipeForm({ initial, onSave, onClose, pantryItems = [],
               rows={2}
               className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-400 resize-none"
             />
+          </div>
+
+          {/* Book reference */}
+          <div className="flex gap-3">
+            <div className="flex-1">
+              <label className="text-xs font-medium text-gray-600 mb-1 block">
+                Book title <span className="text-gray-400">(optional)</span>
+              </label>
+              <input
+                value={form.book_title}
+                onChange={e => setField('book_title', e.target.value)}
+                placeholder="e.g. Salt, Fat, Acid, Heat"
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-400"
+              />
+            </div>
+            <div className="w-24">
+              <label className="text-xs font-medium text-gray-600 mb-1 block">
+                Page <span className="text-gray-400">(opt)</span>
+              </label>
+              <input
+                value={form.book_page}
+                onChange={e => setField('book_page', e.target.value)}
+                placeholder="42"
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-400"
+              />
+            </div>
           </div>
 
           {/* Source URL (shown if populated from import) */}
