@@ -14,6 +14,40 @@ const JSON_HEADERS = { ...CORS, 'Content-Type': 'application/json' }
 const ok = (body: unknown) => new Response(JSON.stringify(body), { headers: JSON_HEADERS })
 const err = (msg: string) => new Response(JSON.stringify({ error: msg }), { headers: JSON_HEADERS })
 
+async function callClaude(apiKey: string, body: unknown, retries = 2): Promise<{ data: any; error: string | null }> {
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify(body),
+    })
+
+    if (res.ok) {
+      return { data: await res.json(), error: null }
+    }
+
+    const errBody = await res.json().catch(() => ({}))
+    const isOverloaded = errBody?.error?.type === 'overloaded_error'
+
+    if (isOverloaded && attempt < retries) {
+      await new Promise(r => setTimeout(r, 1500 * (attempt + 1)))
+      continue
+    }
+
+    if (isOverloaded) {
+      return { data: null, error: 'The AI service is busy right now. Please try again in a moment.' }
+    }
+
+    return { data: null, error: errBody?.error?.message ?? `Request failed (${res.status})` }
+  }
+
+  return { data: null, error: 'The AI service is busy right now. Please try again in a moment.' }
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS })
 
@@ -25,26 +59,19 @@ serve(async (req) => {
 
     // ── Image / vision path (cookbook photo scan) ─────────────────────────────
     if (imageBase64 && mimeType) {
-      const claudeRes = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': apiKey,
-          'anthropic-version': '2023-06-01',
-        },
-        body: JSON.stringify({
-          model: 'claude-haiku-4-5-20251001',
-          max_tokens: 2048,
-          messages: [{
-            role: 'user',
-            content: [
-              {
-                type: 'image',
-                source: { type: 'base64', media_type: mimeType, data: imageBase64 },
-              },
-              {
-                type: 'text',
-                text: `Extract the recipe from this cookbook photo and return ONLY valid JSON (no markdown, no explanation):
+      const { data: claudeData, error: claudeErr } = await callClaude(apiKey, {
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 2048,
+        messages: [{
+          role: 'user',
+          content: [
+            {
+              type: 'image',
+              source: { type: 'base64', media_type: mimeType, data: imageBase64 },
+            },
+            {
+              type: 'text',
+              text: `Extract the recipe from this cookbook photo and return ONLY valid JSON (no markdown, no explanation):
 
 {
   "name": "recipe title",
@@ -63,18 +90,13 @@ Ingredient rules:
 - unit must be one of: count, lbs, oz, g, kg, cups, liters, ml, gallons, dozen, bunch, bag, box, can, bottle, jar, tsp, tbsp, pinch
 - name must not include quantity or unit
 - if no clear unit, use "count"`,
-              },
-            ],
-          }],
-        }),
+            },
+          ],
+        }],
       })
 
-      if (!claudeRes.ok) {
-        const errText = await claudeRes.text()
-        return err(`Vision scan failed: ${errText}`)
-      }
+      if (claudeErr) return err(claudeErr)
 
-      const claudeData = await claudeRes.json()
       const raw = claudeData.content?.[0]?.text ?? ''
       let recipe
       try {
@@ -100,19 +122,12 @@ Ingredient rules:
       return err('Recipe text or image is required')
     }
 
-    const claudeRes = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify({
-        model: 'claude-haiku-4-5-20251001',
-        max_tokens: 2048,
-        messages: [{
-          role: 'user',
-          content: `Extract the recipe from this text and return ONLY valid JSON (no markdown, no explanation):
+    const { data: claudeData, error: claudeErr } = await callClaude(apiKey, {
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 2048,
+      messages: [{
+        role: 'user',
+        content: `Extract the recipe from this text and return ONLY valid JSON (no markdown, no explanation):
 
 {
   "name": "recipe title",
@@ -132,16 +147,11 @@ Ingredient rules:
 
 Recipe text:
 ${text.slice(0, 20000)}`,
-        }],
-      }),
+      }],
     })
 
-    if (!claudeRes.ok) {
-      const errText = await claudeRes.text()
-      return err(`AI parsing failed: ${errText}`)
-    }
+    if (claudeErr) return err(claudeErr)
 
-    const claudeData = await claudeRes.json()
     const raw = claudeData.content?.[0]?.text ?? ''
 
     let recipe
