@@ -10,21 +10,55 @@ const VALID_UNITS = new Set([
   'gallons', 'dozen', 'bunch', 'bag', 'box', 'can', 'bottle', 'jar', 'tsp', 'tbsp', 'pinch',
 ])
 
-// Extract schema.org Recipe from JSON-LD blocks in raw HTML.
-// Most recipe sites embed this for SEO — it's reliable even on JS-rendered pages.
+// Find a Recipe object anywhere inside a parsed JSON value (recursive).
+function findRecipeObject(obj: any, depth = 0): Record<string, any> | null {
+  if (depth > 8 || obj === null || typeof obj !== 'object') return null
+  if (Array.isArray(obj)) {
+    for (const item of obj) {
+      const found = findRecipeObject(item, depth + 1)
+      if (found) return found
+    }
+    return null
+  }
+  // schema.org @type check
+  const type = obj['@type']
+  if (type === 'Recipe' || (Array.isArray(type) && type.includes('Recipe'))) return obj
+  // @graph wrapper
+  if (obj['@graph']) {
+    const found = findRecipeObject(obj['@graph'], depth + 1)
+    if (found) return found
+  }
+  // Generic recipe-like object (Next.js / embedded state)
+  if (obj.recipeIngredient?.length && obj.name) return obj
+  // Recurse into child objects
+  for (const key of Object.keys(obj)) {
+    const val = obj[key]
+    if (val && typeof val === 'object') {
+      const found = findRecipeObject(val, depth + 1)
+      if (found) return found
+    }
+  }
+  return null
+}
+
+// Extract schema.org Recipe from the raw HTML.
+// Checks JSON-LD blocks first, then __NEXT_DATA__ (Next.js SSR apps).
 function extractJsonLd(html: string): Record<string, any> | null {
-  const matches = [...html.matchAll(/<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)]
-  for (const match of matches) {
+  // 1. application/ld+json blocks
+  const ldMatches = [...html.matchAll(/<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)]
+  for (const match of ldMatches) {
     try {
-      const data = JSON.parse(match[1])
-      const items: any[] = Array.isArray(data) ? data : (data['@graph'] ? data['@graph'] : [data])
-      for (const item of items) {
-        const type = item['@type']
-        if (type === 'Recipe' || (Array.isArray(type) && type.includes('Recipe'))) {
-          return item
-        }
-      }
-    } catch { /* malformed JSON-LD, skip */ }
+      const found = findRecipeObject(JSON.parse(match[1]))
+      if (found) return found
+    } catch { /* skip */ }
+  }
+  // 2. Next.js __NEXT_DATA__ (server-side props embedded in the HTML)
+  const nextMatch = html.match(/<script[^>]*id="__NEXT_DATA__"[^>]*>([\s\S]*?)<\/script>/i)
+  if (nextMatch) {
+    try {
+      const found = findRecipeObject(JSON.parse(nextMatch[1]))
+      if (found) return found
+    } catch { /* skip */ }
   }
   return null
 }
@@ -157,8 +191,8 @@ serve(async (req) => {
       .trim()
       .slice(0, 18000)
 
-    if (text.length < 200) {
-      return err('Could not read page content. The site may require JavaScript to load. Try copying the recipe URL directly from your browser.')
+    if (!text.trim()) {
+      return err('Page returned no readable content. The site likely requires JavaScript to load. Try a major recipe site like AllRecipes, Food52, or Serious Eats.')
     }
 
     const claudeRes = await fetch('https://api.anthropic.com/v1/messages', {
