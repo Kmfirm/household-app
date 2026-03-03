@@ -138,8 +138,8 @@ export default function RecipesPage() {
       notes: r.notes ?? '',
       rating: null,
       source_url: null,
-      book_title: cookbookBookTitle.trim() || null,
-      book_page: cookbookPage.trim() || null,
+      book_title: cookbookBookTitle.trim() || r.book_title || null,
+      book_page: cookbookPage.trim() || r.book_page || null,
       recipe_ingredients: (r.ingredients ?? []).map(ing => ({
         name: ing.name,
         quantity: ing.quantity,

@@ -51,6 +51,8 @@ serve(async (req) => {
   "total_servings": 4,
   "instructions": "full numbered step-by-step instructions as a single string",
   "notes": "any tips or notes, or null",
+  "book_title": "the cookbook title if visible anywhere on the page, or null",
+  "book_page": "the page number if visible, as a string, or null",
   "ingredients": [
     { "name": "ingredient name only", "quantity": 1, "unit": "tsp" }
   ]
