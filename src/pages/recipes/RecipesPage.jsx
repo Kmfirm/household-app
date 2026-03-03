@@ -49,7 +49,7 @@ export default function RecipesPage() {
   )
 
   async function handleSave(data) {
-    if (editRecipe) {
+    if (editRecipe?.id) {
       await updateRecipe(editRecipe.id, data)
     } else {
       await addRecipe(data)
