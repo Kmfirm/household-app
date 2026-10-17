@@ -14,21 +14,18 @@ const MEAL_COLORS = {
   dinner: 'bg-green-50 border-green-200 text-green-800',
   snack: 'bg-purple-50 border-purple-200 text-purple-800',
 }
+const SCALE_OPTIONS = [0.5, 1, 2]
 
 function scaleLabel(scale) {
   if (scale === 0.5) return '½x'
   return `${scale ?? 1}x`
 }
 
-function getPantryGaps(recipe, pantryItems) {
-  if (!recipe?.recipe_ingredients?.length) return []
-  return recipe.recipe_ingredients.filter(ing => {
-    const match = pantryItems.find(p =>
-      p.name.toLowerCase().includes(ing.name.toLowerCase()) ||
-      ing.name.toLowerCase().includes(p.name.toLowerCase())
-    )
-    return !match || match.quantity <= 0
-  })
+function getPantryMatch(ing, pantryItems) {
+  return pantryItems.find(p =>
+    p.name.toLowerCase().includes(ing.name.toLowerCase()) ||
+    ing.name.toLowerCase().includes(p.name.toLowerCase())
+  )
 }
 
 export default function CalendarPage() {
@@ -39,31 +36,68 @@ export default function CalendarPage() {
   const { plans, loading, addMeal, updateMeal, removeMeal } = useMealPlan(household?.id, weekStart)
   const { addItem: addToShoppingList } = useShoppingList(household?.id)
   const [assignDay, setAssignDay] = useState(null)
-  const [confirmedIngredients, setConfirmedIngredients] = useState(new Set())
+  const [expandedMeals, setExpandedMeals] = useState(new Set())
+  const [localQtyEdits, setLocalQtyEdits] = useState({})
   const [addingToList, setAddingToList] = useState(new Set())
 
-  function confirmIngredient(name) {
-    setConfirmedIngredients(prev => new Set([...prev, name.toLowerCase()]))
+  function toggleExpanded(planId) {
+    setExpandedMeals(prev => {
+      const s = new Set(prev)
+      if (s.has(planId)) s.delete(planId)
+      else s.add(planId)
+      return s
+    })
   }
 
-  async function addIngredientToList(ingredient, scale) {
-    const key = ingredient.name.toLowerCase()
+  async function changeScale(plan, newScale) {
+    // Clear overrides so scale applies uniformly to all ingredients
+    await updateMeal(plan.id, { scale: newScale, ingredient_overrides: {} })
+    // Also clear any pending local edits for this plan
+    setLocalQtyEdits(prev => {
+      const next = { ...prev }
+      Object.keys(next).forEach(k => { if (k.startsWith(`${plan.id}_`)) delete next[k] })
+      return next
+    })
+  }
+
+  function getIngredientQty(plan, ing) {
+    const key = `${plan.id}_${ing.id}`
+    if (localQtyEdits[key] !== undefined) return localQtyEdits[key]
+    const overrides = plan.ingredient_overrides ?? {}
+    if (overrides[ing.id] !== undefined) return overrides[ing.id]
+    return Math.round(ing.quantity * (plan.scale ?? 1) * 100) / 100
+  }
+
+  function handleQtyChange(plan, ing, value) {
+    setLocalQtyEdits(prev => ({ ...prev, [`${plan.id}_${ing.id}`]: value }))
+  }
+
+  async function handleQtyBlur(plan, ing) {
+    const key = `${plan.id}_${ing.id}`
+    const raw = localQtyEdits[key]
+    if (raw === undefined) return
+    const parsed = parseFloat(raw)
+    if (isNaN(parsed)) {
+      // Revert local edit
+      setLocalQtyEdits(prev => { const n = { ...prev }; delete n[key]; return n })
+      return
+    }
+    const overrides = { ...(plan.ingredient_overrides ?? {}), [ing.id]: parsed }
+    await updateMeal(plan.id, { ingredient_overrides: overrides })
+    setLocalQtyEdits(prev => { const n = { ...prev }; delete n[key]; return n })
+  }
+
+  async function addIngredientToList(ing, qty) {
+    const key = ing.name.toLowerCase()
     setAddingToList(prev => new Set([...prev, key]))
     await addToShoppingList({
-      name: ingredient.name,
-      quantity: Math.round(ingredient.quantity * (scale ?? 1) * 100) / 100,
-      unit: ingredient.unit,
-      category: ingredient.category ?? 'other',
+      name: ing.name,
+      quantity: qty,
+      unit: ing.unit,
+      category: ing.category ?? 'other',
       checked: false,
     })
     setAddingToList(prev => { const s = new Set(prev); s.delete(key); return s })
-    confirmIngredient(ingredient.name)
-  }
-
-  async function addAllMissingToList(gaps, scale) {
-    for (const gap of gaps) {
-      await addIngredientToList(gap, scale)
-    }
   }
 
   const days = Array.from({ length: 7 }, (_, i) => {
@@ -157,27 +191,31 @@ export default function CalendarPage() {
                       const totalServings = plan.recipes?.total_servings
                         ? Math.round(plan.recipes.total_servings * scale * 10) / 10
                         : null
-                      const gaps = getPantryGaps(plan.recipes, pantryItems)
-                      const unconfirmed = gaps.filter(g => !confirmedIngredients.has(g.name.toLowerCase()))
+                      const isExpanded = expandedMeals.has(plan.id)
+                      const ingredients = plan.recipes?.recipe_ingredients ?? []
 
                       return (
                         <div
                           key={plan.id}
                           className={`rounded-lg border px-3 py-2 transition-opacity ${MEAL_COLORS[plan.meal_type]} ${plan.cooked ? 'opacity-50' : ''}`}
                         >
-                          {/* Meal header */}
+                          {/* Meal header — click to collapse/expand */}
                           <div className="flex items-start justify-between gap-2">
-                            <div className="flex-1 min-w-0">
+                            <button
+                              className="flex-1 min-w-0 text-left"
+                              onClick={() => toggleExpanded(plan.id)}
+                            >
                               <div className="flex items-center gap-2 flex-wrap">
                                 <span className="text-xs font-medium capitalize">{plan.meal_type}</span>
                                 <span className={`text-xs font-semibold truncate ${plan.cooked ? 'line-through opacity-60' : ''}`}>
                                   {plan.recipes?.name}
                                 </span>
+                                <span className="text-xs opacity-30">{isExpanded ? '▲' : '▼'}</span>
                               </div>
                               <span className="text-xs opacity-60">
                                 {scaleLabel(scale)}{totalServings !== null ? ` · ${totalServings} serving${totalServings !== 1 ? 's' : ''}` : ''}
                               </span>
-                            </div>
+                            </button>
                             <div className="flex items-center gap-1 shrink-0">
                               <button
                                 onClick={() => updateMeal(plan.id, { cooked: !plan.cooked })}
@@ -198,44 +236,79 @@ export default function CalendarPage() {
                             </div>
                           </div>
 
-                          {/* Missing ingredients */}
-                          {!plan.cooked && unconfirmed.length > 0 && (
+                          {/* Expanded: scale selector + ingredient list */}
+                          {isExpanded && (
                             <div className="mt-2 pt-2 border-t border-current/10">
-                              <div className="flex items-center justify-between mb-1.5">
-                                <span className="text-xs font-medium opacity-70">Missing</span>
-                                <button
-                                  onClick={() => addAllMissingToList(unconfirmed, scale)}
-                                  className="text-xs underline opacity-60 hover:opacity-100"
-                                >
-                                  + Add all to shopping list
-                                </button>
-                              </div>
-                              <div className="flex flex-col gap-1">
-                                {unconfirmed.map(gap => (
-                                  <div key={gap.name} className="flex items-center gap-2">
-                                    <span className="text-xs flex-1 truncate">{gap.name}</span>
+                              {/* Scale selector */}
+                              <div className="flex items-center gap-2 mb-2.5">
+                                <span className="text-xs opacity-60 font-medium">Scale:</span>
+                                <div className="flex gap-1">
+                                  {SCALE_OPTIONS.map(s => (
                                     <button
-                                      onClick={() => confirmIngredient(gap.name)}
-                                      className="text-xs bg-white/70 border border-current/20 rounded px-1.5 py-0.5 hover:bg-green-50 hover:border-green-400 hover:text-green-700 transition-colors whitespace-nowrap"
+                                      key={s}
+                                      onClick={() => changeScale(plan, s)}
+                                      className={`text-xs px-2 py-0.5 rounded border font-medium transition-colors ${
+                                        scale === s
+                                          ? 'bg-current/20 border-current/50'
+                                          : 'bg-white/60 border-current/20 opacity-50 hover:opacity-90'
+                                      }`}
                                     >
-                                      ✓ Have it
+                                      {scaleLabel(s)}
                                     </button>
-                                    <button
-                                      onClick={() => addIngredientToList(gap, scale)}
-                                      disabled={addingToList.has(gap.name.toLowerCase())}
-                                      className="text-xs bg-white/70 border border-current/20 rounded px-1.5 py-0.5 hover:bg-blue-50 hover:border-blue-400 hover:text-blue-700 transition-colors whitespace-nowrap disabled:opacity-40"
-                                    >
-                                      + List
-                                    </button>
-                                  </div>
-                                ))}
+                                  ))}
+                                </div>
                               </div>
-                            </div>
-                          )}
 
-                          {/* All covered */}
-                          {!plan.cooked && gaps.length > 0 && unconfirmed.length === 0 && (
-                            <p className="text-xs text-green-600 mt-1.5 font-medium">✓ All ingredients covered</p>
+                              {/* Ingredient rows */}
+                              {ingredients.length > 0 ? (
+                                <div className="flex flex-col gap-1">
+                                  {ingredients.map(ing => {
+                                    const pantryMatch = getPantryMatch(ing, pantryItems)
+                                    const qty = getIngredientQty(plan, ing)
+
+                                    return (
+                                      <div key={ing.id} className="flex items-center gap-2 text-xs">
+                                        {/* Name */}
+                                        <span className="flex-1 truncate">{ing.name}</span>
+
+                                        {/* Editable quantity */}
+                                        <input
+                                          type="number"
+                                          value={qty}
+                                          min="0"
+                                          step="0.25"
+                                          onChange={e => handleQtyChange(plan, ing, e.target.value)}
+                                          onBlur={() => handleQtyBlur(plan, ing)}
+                                          className="w-14 text-right bg-white/70 border border-current/20 rounded px-1 py-0.5 focus:outline-none focus:border-current/60"
+                                        />
+
+                                        {/* Unit */}
+                                        <span className="opacity-50 w-10 truncate">{ing.unit}</span>
+
+                                        {/* Pantry status */}
+                                        {pantryMatch ? (
+                                          <span className="opacity-60 whitespace-nowrap">
+                                            pantry: {pantryMatch.quantity} {pantryMatch.unit}
+                                          </span>
+                                        ) : plan.cooked ? (
+                                          <span className="opacity-35 whitespace-nowrap italic">had it</span>
+                                        ) : (
+                                          <button
+                                            onClick={() => addIngredientToList(ing, qty)}
+                                            disabled={addingToList.has(ing.name.toLowerCase())}
+                                            className="bg-white/70 border border-current/20 rounded px-1.5 py-0.5 hover:bg-blue-50 hover:border-blue-400 hover:text-blue-700 transition-colors whitespace-nowrap disabled:opacity-40"
+                                          >
+                                            + List
+                                          </button>
+                                        )}
+                                      </div>
+                                    )
+                                  })}
+                                </div>
+                              ) : (
+                                <p className="text-xs opacity-40 italic">No ingredients</p>
+                              )}
+                            </div>
                           )}
                         </div>
                       )
