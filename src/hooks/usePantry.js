@@ -49,20 +49,20 @@ export function usePantry(householdId) {
     return { error }
   }
 
+  // Realtime doesn't deliver DELETE events on filtered subscriptions, so update local state directly
   async function deleteItem(id) {
-    const { error } = await supabase
-      .from('pantry_items')
-      .delete()
-      .eq('id', id)
-    return { error }
+    return deleteItems([id])
   }
 
   async function deleteItems(ids) {
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from('pantry_items')
       .delete()
       .in('id', ids)
-    return { error }
+      .select('id')
+    const deletedIds = new Set((data ?? []).map(row => row.id))
+    if (deletedIds.size) setItems(prev => prev.filter(item => !deletedIds.has(item.id)))
+    return { error, deletedCount: deletedIds.size }
   }
 
   return { items, loading, addItem, updateItem, deleteItem, deleteItems }

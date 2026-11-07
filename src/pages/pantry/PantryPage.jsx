@@ -109,8 +109,13 @@ export default function PantryPage() {
     const count = selectedVisible.length
     if (!confirm(`Remove ${count} item${count !== 1 ? 's' : ''} from the pantry?`)) return
     setDeletingSelected(true)
-    await deleteItems(selectedVisible.map(item => item.id))
+    const { error, deletedCount } = await deleteItems(selectedVisible.map(item => item.id))
     setDeletingSelected(false)
+    if (error) {
+      alert(`Couldn't delete items: ${error.message}`)
+      return
+    }
+    if (deletedCount < count) alert(`Only ${deletedCount} of ${count} items could be deleted.`)
     exitSelecting()
   }
 
@@ -131,7 +136,8 @@ export default function PantryPage() {
 
   async function handleDelete(id) {
     if (confirm('Remove this item from the pantry?')) {
-      await deleteItem(id)
+      const { error, deletedCount } = await deleteItem(id)
+      if (error || !deletedCount) alert(`Couldn't delete item${error ? `: ${error.message}` : ''}`)
     }
   }
 
