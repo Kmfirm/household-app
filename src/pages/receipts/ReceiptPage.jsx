@@ -6,6 +6,7 @@ import { usePantry } from '../../hooks/usePantry'
 import { useReceipts } from '../../hooks/useReceipts'
 import { useUnitConversions } from '../../hooks/useUnitConversions'
 import ConversionPrompt from '../../components/common/ConversionPrompt'
+import EmailImportPanel from './EmailImportPanel'
 
 const CATEGORIES = ['produce', 'dairy', 'meat', 'frozen', 'pantry', 'beverages', 'snacks', 'other']
 
@@ -305,6 +306,10 @@ export default function ReceiptPage() {
             + Scan New Receipt
           </button>
 
+          {household?.id && user?.id && (
+            <EmailImportPanel householdId={household.id} userId={user.id} onImported={fetchReceipts} />
+          )}
+
           {receiptsLoading && (
             <p className="text-sm text-gray-500 text-center py-4">Loading receipts...</p>
           )}
@@ -319,6 +324,9 @@ export default function ReceiptPage() {
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium text-gray-800 truncate">
                     {r.store_name || 'Unknown store'} — {r.purchase_date}
+                    {r.source === 'email' && (
+                      <span className="ml-2 text-[10px] font-medium px-1.5 py-0.5 rounded bg-blue-50 text-blue-700">Email</span>
+                    )}
                   </p>
                   {r.total_spent != null && (
                     <p className="text-xs text-gray-500 mt-0.5">${parseFloat(r.total_spent).toFixed(2)}</p>
