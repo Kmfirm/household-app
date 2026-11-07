@@ -25,6 +25,33 @@ function expirationStatus(expDate) {
   return { label: `${days}d left`, color: 'text-gray-400 bg-gray-50' }
 }
 
+// Prefer the receipt's purchase date; fall back to when the item was added
+function purchasedOn(item) {
+  let date = null
+  if (item.receipts?.purchase_date) {
+    // Parse YYYY-MM-DD as a local date so it doesn't shift a day in US time zones
+    const [y, m, d] = item.receipts.purchase_date.split('-').map(Number)
+    date = new Date(y, m - 1, d)
+  } else if (item.date_added) {
+    date = new Date(item.date_added)
+  }
+  if (!date) return null
+  const sameYear = date.getFullYear() === new Date().getFullYear()
+  return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', ...(sameYear ? {} : { year: 'numeric' }) })
+}
+
+const formatQty = q => String(Math.round(Number(q) * 100) / 100)
+
+function remaining(item) {
+  const qty = Number(item.quantity)
+  const bought = Number(item.purchased_quantity)
+  if (!bought || qty >= bought) return { label: `${formatQty(qty)} ${item.unit} left`, pct: bought ? 1 : null }
+  const pct = Math.max(0, qty / bought)
+  return { label: `${formatQty(qty)} of ${formatQty(bought)} ${item.unit} left`, pct }
+}
+
+const barColor = pct => (pct > 0.5 ? 'bg-green-500' : pct > 0.2 ? 'bg-yellow-400' : 'bg-red-400')
+
 export default function PantryPage() {
   const { household } = useHousehold()
   const { items, loading, addItem, updateItem, deleteItem } = usePantry(household?.id)
@@ -116,6 +143,8 @@ export default function PantryPage() {
         <div className="flex flex-col gap-2">
           {filtered.map(item => {
             const exp = expirationStatus(item.expiration_date)
+            const left = remaining(item)
+            const bought = purchasedOn(item)
             return (
               <div
                 key={item.id}
@@ -134,9 +163,19 @@ export default function PantryPage() {
                     )}
                   </div>
                   <p className="text-xs text-gray-500 mt-0.5">
-                    {item.quantity} {item.unit} · {item.storage_location}
+                    {left.label} · {item.storage_location}
                     {item.brand ? ` · ${item.brand}` : ''}
                   </p>
+                  {left.pct != null && (
+                    <div className="mt-1.5 h-1.5 w-full max-w-48 bg-gray-100 rounded-full overflow-hidden">
+                      <div className={`h-full rounded-full ${barColor(left.pct)}`} style={{ width: `${left.pct * 100}%` }} />
+                    </div>
+                  )}
+                  {bought && (
+                    <p className="text-xs text-gray-400 mt-1">
+                      Bought {bought}{item.store_of_purchase ? ` at ${item.store_of_purchase}` : ''}
+                    </p>
+                  )}
                 </div>
                 <div className="flex gap-2 ml-3 shrink-0">
                   <button

@@ -27,7 +27,7 @@ export function usePantry(householdId) {
   async function fetchItems() {
     const { data } = await supabase
       .from('pantry_items')
-      .select('*')
+      .select('*, receipts(purchase_date)')
       .eq('household_id', householdId)
       .order('name')
     setItems(data ?? [])
