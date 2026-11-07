@@ -52,8 +52,10 @@ export function useShoppingList(householdId) {
     return { error }
   }
 
+  // Realtime doesn't deliver DELETE events on filtered subscriptions, so update local state directly
   async function deleteItem(id) {
     const { error } = await supabase.from('shopping_items').delete().eq('id', id)
+    if (!error) setItems(prev => prev.filter(i => i.id !== id))
     return { error }
   }
 
@@ -63,6 +65,7 @@ export function useShoppingList(householdId) {
       .delete()
       .eq('household_id', householdId)
       .eq('checked', true)
+    if (!error) setItems(prev => prev.filter(i => !i.checked))
     return { error }
   }
 
@@ -126,6 +129,7 @@ export function useShoppingList(householdId) {
         checked: false,
       })))
 
+    await fetchItems()
     return { count: missing.length, error }
   }
 
@@ -147,13 +151,7 @@ export function useShoppingList(householdId) {
         store_of_purchase: item.store ?? null,
       })))
 
-    if (!error) {
-      await supabase
-        .from('shopping_items')
-        .delete()
-        .eq('household_id', householdId)
-        .eq('checked', true)
-    }
+    if (!error) await clearChecked()
 
     return { count: checked.length, error }
   }

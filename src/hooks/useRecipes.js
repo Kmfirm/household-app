@@ -72,8 +72,10 @@ export function useRecipes(householdId) {
     return {}
   }
 
+  // Realtime doesn't deliver DELETE events on filtered subscriptions, so update local state directly
   async function deleteRecipe(id) {
     const { error } = await supabase.from('recipes').delete().eq('id', id)
+    if (!error) setRecipes(prev => prev.filter(r => r.id !== id))
     return { error }
   }
 

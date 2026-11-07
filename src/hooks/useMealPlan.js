@@ -61,8 +61,10 @@ export function useMealPlan(householdId, weekStart) {
     return { error }
   }
 
+  // Realtime doesn't deliver DELETE events on filtered subscriptions, so update local state directly
   async function removeMeal(id) {
     const { error } = await supabase.from('meal_plans').delete().eq('id', id)
+    if (!error) setPlans(prev => prev.filter(p => p.id !== id))
     return { error }
   }
 

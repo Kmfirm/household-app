@@ -79,13 +79,16 @@ export function useLeftovers(householdId) {
 
   async function updateServings(id, remaining_servings) {
     if (remaining_servings <= 0) {
-      return supabase.from('leftovers').delete().eq('id', id)
+      return deleteLeftover(id)
     }
     return supabase.from('leftovers').update({ remaining_servings }).eq('id', id)
   }
 
+  // Realtime doesn't deliver DELETE events on filtered subscriptions, so update local state directly
   async function deleteLeftover(id) {
-    return supabase.from('leftovers').delete().eq('id', id)
+    const result = await supabase.from('leftovers').delete().eq('id', id)
+    if (!result.error) setLeftovers(prev => prev.filter(l => l.id !== id))
+    return result
   }
 
   return { leftovers, loading, cookRecipe, updateServings, deleteLeftover }
