@@ -57,5 +57,13 @@ export function usePantry(householdId) {
     return { error }
   }
 
-  return { items, loading, addItem, updateItem, deleteItem }
+  async function deleteItems(ids) {
+    const { error } = await supabase
+      .from('pantry_items')
+      .delete()
+      .in('id', ids)
+    return { error }
+  }
+
+  return { items, loading, addItem, updateItem, deleteItem, deleteItems }
 }

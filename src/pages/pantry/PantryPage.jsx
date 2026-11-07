@@ -26,15 +26,17 @@ function expirationStatus(expDate) {
 }
 
 // Prefer the receipt's purchase date; fall back to when the item was added
-function purchasedOn(item) {
-  let date = null
+function purchaseDate(item) {
   if (item.receipts?.purchase_date) {
     // Parse YYYY-MM-DD as a local date so it doesn't shift a day in US time zones
     const [y, m, d] = item.receipts.purchase_date.split('-').map(Number)
-    date = new Date(y, m - 1, d)
-  } else if (item.date_added) {
-    date = new Date(item.date_added)
+    return new Date(y, m - 1, d)
   }
+  return item.date_added ? new Date(item.date_added) : null
+}
+
+function formatPurchaseDate(item) {
+  const date = purchaseDate(item)
   if (!date) return null
   const sameYear = date.getFullYear() === new Date().getFullYear()
   return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', ...(sameYear ? {} : { year: 'numeric' }) })
@@ -52,20 +54,65 @@ function remaining(item) {
 
 const barColor = pct => (pct > 0.5 ? 'bg-green-500' : pct > 0.2 ? 'bg-yellow-400' : 'bg-red-400')
 
+const byName = (a, b) => a.name.localeCompare(b.name)
+const byDate = (a, b) => (purchaseDate(a)?.getTime() ?? 0) - (purchaseDate(b)?.getTime() ?? 0)
+
+const SORTS = {
+  name: { label: 'Name', compare: byName },
+  type: { label: 'Type', compare: (a, b) => a.category.localeCompare(b.category) || byName(a, b) },
+  newest: { label: 'Newest purchase', compare: (a, b) => byDate(b, a) || byName(a, b) },
+  oldest: { label: 'Oldest purchase', compare: (a, b) => byDate(a, b) || byName(a, b) },
+}
+
 export default function PantryPage() {
   const { household } = useHousehold()
-  const { items, loading, addItem, updateItem, deleteItem } = usePantry(household?.id)
+  const { items, loading, addItem, updateItem, deleteItem, deleteItems } = usePantry(household?.id)
   const { getConversion, upsertConversion } = useUnitConversions(household?.id)
   const [search, setSearch] = useState('')
   const [filterCategory, setFilterCategory] = useState('all')
+  const [sortBy, setSortBy] = useState('name')
   const [showForm, setShowForm] = useState(false)
   const [editItem, setEditItem] = useState(null)
+  const [selecting, setSelecting] = useState(false)
+  const [selectedIds, setSelectedIds] = useState(new Set())
+  const [deletingSelected, setDeletingSelected] = useState(false)
 
   const filtered = items.filter(item => {
     const matchSearch = item.name.toLowerCase().includes(search.toLowerCase())
     const matchCat = filterCategory === 'all' || item.category === filterCategory
     return matchSearch && matchCat
-  })
+  }).sort(SORTS[sortBy].compare)
+
+  // Only count selections that are still visible under the current search/filter
+  const selectedVisible = filtered.filter(item => selectedIds.has(item.id))
+  const allVisibleSelected = filtered.length > 0 && selectedVisible.length === filtered.length
+
+  function toggleSelected(id) {
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  function toggleSelectAll() {
+    setSelectedIds(allVisibleSelected ? new Set() : new Set(filtered.map(item => item.id)))
+  }
+
+  function exitSelecting() {
+    setSelecting(false)
+    setSelectedIds(new Set())
+  }
+
+  async function handleDeleteSelected() {
+    const count = selectedVisible.length
+    if (!confirm(`Remove ${count} item${count !== 1 ? 's' : ''} from the pantry?`)) return
+    setDeletingSelected(true)
+    await deleteItems(selectedVisible.map(item => item.id))
+    setDeletingSelected(false)
+    exitSelecting()
+  }
 
   async function handleSave(data) {
     if (editItem) {
@@ -122,8 +169,47 @@ export default function PantryPage() {
         </select>
       </div>
 
-      {/* Item count */}
-      <p className="text-xs text-gray-400 mb-3">{filtered.length} item{filtered.length !== 1 ? 's' : ''}</p>
+      {/* Item count, sort & select */}
+      <div className="flex items-center gap-2 mb-3">
+        <p className="text-xs text-gray-400 flex-1">{filtered.length} item{filtered.length !== 1 ? 's' : ''}</p>
+        <label className="text-xs text-gray-500 flex items-center gap-1">
+          Sort
+          <select
+            value={sortBy}
+            onChange={e => setSortBy(e.target.value)}
+            className="border border-gray-300 rounded-lg px-2 py-1 text-xs focus:outline-none"
+          >
+            {Object.entries(SORTS).map(([key, s]) => (
+              <option key={key} value={key}>{s.label}</option>
+            ))}
+          </select>
+        </label>
+        {filtered.length > 0 && (
+          <button
+            onClick={() => (selecting ? exitSelecting() : setSelecting(true))}
+            className="text-xs text-green-600 hover:text-green-800 font-medium px-2 py-1 border border-green-200 rounded-lg"
+          >
+            {selecting ? 'Done' : 'Select'}
+          </button>
+        )}
+      </div>
+
+      {/* Bulk actions */}
+      {selecting && (
+        <div className="sticky top-[env(safe-area-inset-top,0px)] z-10 bg-white border border-gray-200 rounded-xl shadow-sm px-3 py-2 mb-3 flex items-center gap-3">
+          <label className="flex items-center gap-2 text-xs text-gray-600 flex-1">
+            <input type="checkbox" checked={allVisibleSelected} onChange={toggleSelectAll} className="accent-green-600" />
+            {selectedVisible.length > 0 ? `${selectedVisible.length} selected` : 'Select all'}
+          </label>
+          <button
+            onClick={handleDeleteSelected}
+            disabled={selectedVisible.length === 0 || deletingSelected}
+            className="text-xs bg-red-500 text-white font-medium px-3 py-1.5 rounded-lg hover:bg-red-600 disabled:opacity-40"
+          >
+            {deletingSelected ? 'Deleting...' : `Delete${selectedVisible.length ? ` (${selectedVisible.length})` : ''}`}
+          </button>
+        </div>
+      )}
 
       {/* Items list */}
       {loading ? (
@@ -144,12 +230,26 @@ export default function PantryPage() {
           {filtered.map(item => {
             const exp = expirationStatus(item.expiration_date)
             const left = remaining(item)
-            const bought = purchasedOn(item)
+            const bought = formatPurchaseDate(item)
+            const isSelected = selectedIds.has(item.id)
             return (
               <div
                 key={item.id}
-                className="bg-white rounded-xl border border-gray-100 shadow-sm p-4 flex items-center justify-between"
+                onClick={selecting ? () => toggleSelected(item.id) : undefined}
+                className={`bg-white rounded-xl border shadow-sm p-4 flex items-center justify-between ${
+                  selecting ? 'cursor-pointer' : ''
+                } ${isSelected ? 'border-green-400 ring-1 ring-green-400' : 'border-gray-100'}`}
               >
+                {selecting && (
+                  <input
+                    type="checkbox"
+                    checked={isSelected}
+                    onChange={() => toggleSelected(item.id)}
+                    onClick={e => e.stopPropagation()}
+                    className="mr-3 accent-green-600 shrink-0"
+                    aria-label={`Select ${item.name}`}
+                  />
+                )}
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="font-medium text-gray-800 text-sm">{item.name}</span>
@@ -177,7 +277,7 @@ export default function PantryPage() {
                     </p>
                   )}
                 </div>
-                <div className="flex gap-2 ml-3 shrink-0">
+                {!selecting && <div className="flex gap-2 ml-3 shrink-0">
                   <button
                     onClick={() => handleEdit(item)}
                     className="text-xs text-blue-500 hover:text-blue-700 px-2 py-1 rounded"
@@ -190,7 +290,7 @@ export default function PantryPage() {
                   >
                     Delete
                   </button>
-                </div>
+                </div>}
               </div>
             )
           })}
