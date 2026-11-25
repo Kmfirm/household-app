@@ -4,6 +4,8 @@ import { useRecipes } from '../../hooks/useRecipes'
 import { usePantry } from '../../hooks/usePantry'
 import { useMealPlan, getWeekStart, toDateStr } from '../../hooks/useMealPlan'
 import { useShoppingList } from '../../hooks/useShoppingList'
+import { useUnitConversions } from '../../hooks/useUnitConversions'
+import { deductIngredientsFromPantry } from '../../lib/pantryDeduction'
 import AssignMealModal from './AssignMealModal'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
@@ -39,6 +41,9 @@ export default function CalendarPage() {
   const [expandedMeals, setExpandedMeals] = useState(new Set())
   const [localQtyEdits, setLocalQtyEdits] = useState({})
   const [addingToList, setAddingToList] = useState(new Set())
+  const { conversions } = useUnitConversions(household?.id)
+  const [cookingIds, setCookingIds] = useState(new Set())
+  const [toast, setToast] = useState(null)
 
   function toggleExpanded(planId) {
     setExpandedMeals(prev => {
@@ -85,6 +90,33 @@ export default function CalendarPage() {
     const overrides = { ...(plan.ingredient_overrides ?? {}), [ing.id]: parsed }
     await updateMeal(plan.id, { ingredient_overrides: overrides })
     setLocalQtyEdits(prev => { const n = { ...prev }; delete n[key]; return n })
+  }
+
+  async function toggleCooked(plan) {
+    if (plan.cooked) {
+      await updateMeal(plan.id, { cooked: false })
+      return
+    }
+    if (cookingIds.has(plan.id)) return
+    setCookingIds(prev => new Set([...prev, plan.id]))
+    try {
+      // Use the planned quantities (scale + any per-ingredient edits)
+      const ingredients = (plan.recipes?.recipe_ingredients ?? []).map(ing => {
+        const qty = parseFloat(getIngredientQty(plan, ing))
+        return { ...ing, quantity: isNaN(qty) ? 0 : qty }
+      })
+      const { deducted, skipped } = await deductIngredientsFromPantry(household.id, ingredients, conversions)
+      await updateMeal(plan.id, { cooked: true })
+      const parts = [`Cooked ${plan.recipes?.name ?? 'meal'}.`]
+      if (deducted.length) parts.push(`Updated ${deducted.length} pantry item${deducted.length !== 1 ? 's' : ''}.`)
+      if (skipped.length) parts.push(`Not deducted: ${skipped.join(', ')}.`)
+      setToast(parts.join(' '))
+    } catch (err) {
+      setToast(`Couldn't update pantry: ${err.message}`)
+    } finally {
+      setCookingIds(prev => { const s = new Set(prev); s.delete(plan.id); return s })
+      setTimeout(() => setToast(null), 6000)
+    }
   }
 
   async function addIngredientToList(ing, qty) {
@@ -218,14 +250,15 @@ export default function CalendarPage() {
                             </button>
                             <div className="flex items-center gap-1 shrink-0">
                               <button
-                                onClick={() => updateMeal(plan.id, { cooked: !plan.cooked })}
+                                onClick={() => toggleCooked(plan)}
+                                disabled={cookingIds.has(plan.id)}
                                 className={`text-xs px-2 py-1 rounded-lg border font-medium transition-colors ${
                                   plan.cooked
                                     ? 'bg-green-600 text-white border-green-600'
                                     : 'bg-white/60 border-current/30 opacity-70 hover:opacity-100'
                                 }`}
                               >
-                                {plan.cooked ? '✓ Cooked' : 'Mark cooked'}
+                                {cookingIds.has(plan.id) ? 'Saving…' : plan.cooked ? '✓ Cooked' : 'Mark cooked'}
                               </button>
                               <button
                                 onClick={() => removeMeal(plan.id)}
@@ -318,6 +351,12 @@ export default function CalendarPage() {
               </div>
             )
           })}
+        </div>
+      )}
+
+      {toast && (
+        <div className="fixed bottom-20 left-4 right-4 md:left-auto md:right-6 md:max-w-sm bg-gray-800 text-white text-sm rounded-xl px-4 py-3 shadow-lg z-50">
+          {toast}
         </div>
       )}
 

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
-import { calcDeduction } from './useRecipeMatch'
+import { deductIngredientsFromPantry } from '../lib/pantryDeduction'
 
 export function useLeftovers(householdId) {
   const { user } = useAuth()
@@ -53,28 +53,13 @@ export function useLeftovers(householdId) {
     }
 
     // Deduct ingredients from pantry (scaled by how many servings were cooked)
-    for (const ing of recipe.recipe_ingredients ?? []) {
-      const scaledQty = ing.quantity * scaleFactor
-      const { data: pantryItems } = await supabase
-        .from('pantry_items')
-        .select('id, name, quantity, unit')
-        .eq('household_id', householdId)
-        .ilike('name', ing.name)
-        .limit(1)
+    const ingredients = (recipe.recipe_ingredients ?? []).map(ing => ({
+      ...ing,
+      quantity: ing.quantity * scaleFactor,
+    }))
+    const pantryResult = await deductIngredientsFromPantry(householdId, ingredients, conversions ?? [])
 
-      if (pantryItems?.length) {
-        const item = pantryItems[0]
-        const deduction = calcDeduction(item, scaledQty, ing.unit, ing.name, conversions ?? [])
-        if (deduction) {
-          await supabase
-            .from('pantry_items')
-            .update({ quantity: deduction.newQuantity })
-            .eq('id', item.id)
-        }
-      }
-    }
-
-    return { remaining }
+    return { remaining, ...pantryResult }
   }
 
   async function updateServings(id, remaining_servings) {

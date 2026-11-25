@@ -43,13 +43,16 @@ export default function RecipeDetail({ recipe, onEdit, onDelete, onBack, onRate 
   ).length
 
   async function handleCook(data) {
-    const { remaining } = await cookRecipe({ ...data, conversions })
-    setCookedToast(
-      remaining > 0
-        ? `Cooked! ${remaining} serving${remaining !== 1 ? 's' : ''} saved as leftovers.`
-        : 'Cooked! Pantry updated.'
-    )
-    setTimeout(() => setCookedToast(null), 3500)
+    const { remaining, deducted = [], skipped = [] } = await cookRecipe({ ...data, conversions })
+    const base = remaining > 0
+      ? `Cooked! ${remaining} serving${remaining !== 1 ? 's' : ''} saved as leftovers.`
+      : 'Cooked!'
+    const pantryMsg = deducted.length
+      ? ` Updated ${deducted.length} pantry item${deducted.length !== 1 ? 's' : ''}.`
+      : ''
+    const skippedMsg = skipped.length ? ` Not deducted: ${skipped.join(', ')}.` : ''
+    setCookedToast(base + pantryMsg + skippedMsg)
+    setTimeout(() => setCookedToast(null), skipped.length ? 6000 : 3500)
   }
 
   async function handleAddMissingToList() {
