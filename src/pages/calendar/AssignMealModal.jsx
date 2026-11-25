@@ -1,13 +1,45 @@
 import { useState } from 'react'
+import RecipeForm from '../recipes/RecipeForm'
 
 const MEAL_TYPES = ['breakfast', 'lunch', 'dinner', 'snack']
 const SCALES = [0.5, 1, 2]
 
-export default function AssignMealModal({ date, recipes, onSave, onClose }) {
+export default function AssignMealModal({ date, recipes, onSave, onClose, onCreateRecipe, pantryItems = [], allIngredients = [] }) {
   const [recipeId, setRecipeId] = useState('')
   const [mealType, setMealType] = useState('dinner')
   const [scale, setScale] = useState(1)
   const [loading, setLoading] = useState(false)
+  const [creatingRecipe, setCreatingRecipe] = useState(false)
+  const [createError, setCreateError] = useState(null)
+
+  async function handleCreateRecipe(data) {
+    const { data: created, error } = await onCreateRecipe(data)
+    if (error) {
+      setCreateError(error.message ?? 'Could not save recipe')
+      return
+    }
+    setCreateError(null)
+    setRecipeId(created.id)
+    setCreatingRecipe(false)
+  }
+
+  if (creatingRecipe) {
+    return (
+      <>
+        <RecipeForm
+          onSave={handleCreateRecipe}
+          onClose={() => { setCreatingRecipe(false); setCreateError(null) }}
+          pantryItems={pantryItems}
+          allIngredients={allIngredients}
+        />
+        {createError && (
+          <div className="fixed top-4 left-4 right-4 md:left-auto md:right-6 md:max-w-sm bg-red-600 text-white text-sm rounded-xl px-4 py-3 shadow-lg z-[60]">
+            {createError}
+          </div>
+        )}
+      </>
+    )
+  }
 
   const selectedRecipe = recipes.find(r => r.id === recipeId)
   const scaledServings = selectedRecipe
@@ -50,6 +82,15 @@ export default function AssignMealModal({ date, recipes, onSave, onClose }) {
                 <option key={r.id} value={r.id}>{r.name}</option>
               ))}
             </select>
+            {onCreateRecipe && (
+              <button
+                type="button"
+                onClick={() => setCreatingRecipe(true)}
+                className="mt-1.5 text-xs text-green-600 hover:text-green-700 font-medium"
+              >
+                + Create new recipe
+              </button>
+            )}
           </div>
 
           {/* Meal type */}

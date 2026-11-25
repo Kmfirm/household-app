@@ -52,6 +52,8 @@ export function useMealPlan(householdId, weekStart) {
         meal_type,
         scale: scale ?? 1,
       })
+    // Don't rely on realtime to show the new meal
+    if (!error) await fetchPlans()
     return { error }
   }
 

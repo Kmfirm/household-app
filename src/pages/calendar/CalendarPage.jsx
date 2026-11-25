@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { useHousehold } from '../../hooks/useHousehold'
 import { useRecipes } from '../../hooks/useRecipes'
 import { usePantry } from '../../hooks/usePantry'
@@ -32,7 +32,7 @@ function getPantryMatch(ing, pantryItems) {
 
 export default function CalendarPage() {
   const { household } = useHousehold()
-  const { recipes } = useRecipes(household?.id)
+  const { recipes, addRecipe } = useRecipes(household?.id)
   const { items: pantryItems } = usePantry(household?.id)
   const [weekStart, setWeekStart] = useState(getWeekStart())
   const { plans, loading, addMeal, updateMeal, removeMeal } = useMealPlan(household?.id, weekStart)
@@ -44,6 +44,19 @@ export default function CalendarPage() {
   const { conversions } = useUnitConversions(household?.id)
   const [cookingIds, setCookingIds] = useState(new Set())
   const [toast, setToast] = useState(null)
+
+  // Ingredient names used across recipes, most common first (for the recipe form's suggestions)
+  const allIngredients = useMemo(() => {
+    const freq = {}
+    for (const recipe of recipes) {
+      for (const ing of recipe.recipe_ingredients ?? []) {
+        const key = ing.name.toLowerCase()
+        if (!freq[key]) freq[key] = { name: ing.name, unit: ing.unit, count: 0 }
+        freq[key].count++
+      }
+    }
+    return Object.values(freq).sort((a, b) => b.count - a.count)
+  }, [recipes])
 
   function toggleExpanded(planId) {
     setExpandedMeals(prev => {
@@ -364,6 +377,9 @@ export default function CalendarPage() {
         <AssignMealModal
           date={assignDay}
           recipes={recipes}
+          onCreateRecipe={addRecipe}
+          pantryItems={pantryItems}
+          allIngredients={allIngredients}
           onSave={async (data) => {
             await addMeal({ ...data, date: assignDay })
             setAssignDay(null)
