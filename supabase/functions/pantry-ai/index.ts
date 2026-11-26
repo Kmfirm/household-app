@@ -1,6 +1,6 @@
 // Pantry AI: identifies grocery items from the user's text and/or photos and proposes
-// pantry entries. It never writes to the database; the app shows the list for review
-// and adds the items the user confirms.
+// pantry additions and removals. It never writes to the database; the app shows the
+// proposal for review and applies only what the user confirms.
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import Anthropic from 'npm:@anthropic-ai/sdk@1.14.0'
 import { zodOutputFormat } from 'npm:@anthropic-ai/sdk@1.14.0/helpers/zod'
@@ -31,16 +31,38 @@ const Item = z.object({
   estimated_freshness_days: z.number().nullable(),
 })
 
+const Removal = z.object({
+  // id of an existing pantry item from the context
+  item_id: z.string(),
+  // "delete" removes the item entirely; "reduce" subtracts `amount` (in the item's own unit)
+  action: z.enum(['delete', 'reduce']),
+  amount: z.number().nullable(),
+  reason: z.string(),
+})
+
 const Response_ = z.object({
   reply: z.string(),
   items: z.array(Item),
+  removals: z.array(Removal),
 })
 
-const SYSTEM_PROMPT = `You help a household add groceries to their pantry tracker. The user describes items in text and/or sends photos (loose produce, a fridge shelf, a grocery haul on the counter, a package label).
+const SYSTEM_PROMPT = `You help a household keep their pantry tracker up to date: adding groceries they bought and removing or using up items they finished, threw out or used. The user describes things in text and/or sends photos (loose produce, a fridge shelf, a grocery haul on the counter, a package label).
 
-Return "reply" (1-3 short, plain sentences) and "items": the complete list of items to add, as it stands after this message. The context's "current_list" is the list the user is looking at right now, including any edits they made by hand; when they correct or add something in a follow-up, start from current_list and return the whole updated list, not just the change. Use names from "existing_pantry_items" when an item is clearly the same thing, so it matches what's already tracked. If the request is unclear (e.g. a blurry photo), say so in reply and return your best list or an empty one.
+Return "reply" (1-3 short, plain sentences), plus two lists, each complete as it stands after this message:
+- "items": new items to add.
+- "removals": changes to items already in the pantry.
+The context's "current_list" and "current_removals" are what the user is looking at right now, including edits they made by hand; when they correct or add something in a follow-up, start from those and return the whole updated lists, not just the change. Use names from "pantry_items" when a new item is clearly the same thing as something already tracked, so names match.
 
-For each item:
+Removals (only for items in "pantry_items", referenced by their exact "id"):
+- action "delete": the item is gone (finished, thrown out, spoiled, "remove the milk"). amount is null.
+- action "reduce": part of it was used ("used 3 eggs", "ate half the grapes"). amount is how much to subtract, in that item's own unit (e.g. item is 12 count eggs and 3 were used -> 3; item is 2 lbs grapes and half was eaten -> 1). If they used all of it, use "delete" instead.
+- When several pantry items match (e.g. two cartons of almond milk), pick the oldest purchase unless the user says otherwise, and mention the choice in reply. If you can't tell which item they mean, ask in reply and leave it out.
+- reason: a few words, e.g. "finished", "expired", "used 3 for baking".
+- Never remove items the user didn't mention. A photo alone only adds items, unless the user says the photo shows things to remove.
+
+If the request is unclear (e.g. a blurry photo), say so in reply and return your best lists or empty ones.
+
+For each item to add:
 - name: a simple generic name that will match recipe ingredients, e.g. "Bananas", "Red Bell Peppers", "Baby Spinach", "Greek Yogurt". Put brands in "brand" (null if unknown or unbranded produce).
 - quantity and unit: count what you can see. Use unit "count" for countable things (5 apples, 3 avocados, 1 bunch of bananas -> count the bananas when visible), "lbs" or "oz" for things sold by weight with no clear count (a bag of grapes, loose green beans: estimate), and the package size for packaged goods when readable (e.g. 32 oz yogurt -> 32 "oz"). Allowed units: count, lbs, oz, g, kg, cups, liters, ml, gallons, dozen, bunch, bag, box, can, bottle, jar.
 - category: one of the household's categories listed in the context; use "other" if none fits.
@@ -109,7 +131,7 @@ serve(async (req) => {
     }))
 
     if (response.stop_reason === 'refusal') {
-      return json({ reply: "Sorry, I can't help with that one. Try a different photo or description.", items: [] })
+      return json({ reply: "Sorry, I can't help with that one. Try a different photo or description.", items: [], removals: [] })
     }
     if (response.stop_reason === 'max_tokens' || !response.parsed_output) {
       return json({ error: 'The AI response was cut off. Try fewer items at once.' }, 502)

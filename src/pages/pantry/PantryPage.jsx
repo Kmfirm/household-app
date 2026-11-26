@@ -218,7 +218,7 @@ export default function PantryPage() {
             onClick={() => setShowAi(true)}
             className="bg-purple-600 text-white text-sm px-3 py-2 rounded-lg hover:bg-purple-700"
           >
-            ✨ AI add
+            ✨ AI
           </button>
           <button
             onClick={() => { setEditItem(null); setShowForm(true) }}
@@ -403,10 +403,18 @@ export default function PantryPage() {
           addCategory={addCategory}
           existingItems={items}
           addItem={addItem}
+          updateItem={updateItem}
+          deleteItems={deleteItems}
           onClose={() => setShowAi(false)}
-          onAdded={count => {
+          onDone={({ added, removed, reduced }) => {
             setShowAi(false)
-            setToast(`Added ${count} item${count !== 1 ? 's' : ''} to the pantry`)
+            const plural = n => `${n} item${n !== 1 ? 's' : ''}`
+            const parts = [
+              added ? `Added ${plural(added)}` : null,
+              removed ? `removed ${plural(removed)}` : null,
+              reduced ? `updated ${plural(reduced)}` : null,
+            ].filter(Boolean).join(', ')
+            setToast(parts ? `${parts.charAt(0).toUpperCase()}${parts.slice(1)}.` : 'No changes made.')
             setTimeout(() => setToast(null), 3500)
           }}
         />
