@@ -7,8 +7,25 @@ import { useReceipts } from '../../hooks/useReceipts'
 import { useUnitConversions } from '../../hooks/useUnitConversions'
 import ConversionPrompt from '../../components/common/ConversionPrompt'
 import EmailImportPanel from './EmailImportPanel'
+import CategorySelect from '../../components/common/CategorySelect'
+import { useCategories } from '../../hooks/useCategories'
 
-const CATEGORIES = ['produce', 'dairy', 'meat', 'frozen', 'pantry', 'beverages', 'snacks', 'other']
+// One pantry row per package: "2 × Almondmilk" becomes two items, each with
+// one package's quantity and half the price. Weighed items are never split.
+const MAX_SPLIT = 24
+function splitPurchases(item) {
+  const n = Number(item.purchase_count)
+  const qty = Number(item.quantity)
+  if (!Number.isInteger(n) || n < 2 || n > MAX_SPLIT || !(qty > 0)) return [item]
+  const price = parseFloat(item.price)
+  const each = price ? Math.floor((price / n) * 100) / 100 : null
+  return Array.from({ length: n }, (_, i) => ({
+    ...item,
+    quantity: Math.round((qty / n) * 1000) / 1000,
+    // Last row absorbs rounding so the total still matches the receipt
+    price: each === null ? item.price : (i === n - 1 ? Math.round((price - each * (n - 1)) * 100) / 100 : each),
+  }))
+}
 
 export default function ReceiptPage() {
   const { household } = useHousehold()
@@ -26,6 +43,7 @@ export default function ReceiptPage() {
     getImageUrl,
   } = useReceipts(household?.id)
   const { getConversion, upsertConversion } = useUnitConversions(household?.id)
+  const { categories, addCategory } = useCategories(household?.id)
 
   const fileRef = useRef()
 
@@ -176,8 +194,8 @@ export default function ReceiptPage() {
       total_spent: totalSpent > 0 ? totalSpent : null,
     }).select().single()
 
-    // Add selected items to pantry using net prices
-    for (const item of selected) {
+    // Add selected items to pantry using net prices (multiples become separate items)
+    for (const item of selected.flatMap(splitPurchases)) {
       await addItem({
         name: item.name,
         brand_name: item.brand_name ?? null,
@@ -471,13 +489,14 @@ export default function ReceiptPage() {
                           onChange={e => updateItem(item.id, 'unit', e.target.value)}
                           className="w-16 border border-gray-200 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-green-400"
                         />
-                        <select
+                        <CategorySelect
                           value={item.category}
-                          onChange={e => updateItem(item.id, 'category', e.target.value)}
+                          onChange={v => updateItem(item.id, 'category', v)}
+                          categories={categories}
+                          onAdd={addCategory}
+                          labelCase="lower"
                           className="border border-gray-200 rounded px-2 py-1 text-xs focus:outline-none"
-                        >
-                          {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
-                        </select>
+                        />
                         <div className="flex items-center gap-1 self-center">
                           <span className="text-xs text-gray-400">$</span>
                           <input
@@ -639,13 +658,14 @@ export default function ReceiptPage() {
                         onChange={e => updateEditItem(item.id, 'unit', e.target.value)}
                         className="w-16 border border-gray-200 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-green-400"
                       />
-                      <select
+                      <CategorySelect
                         value={item.category}
-                        onChange={e => updateEditItem(item.id, 'category', e.target.value)}
+                        onChange={v => updateEditItem(item.id, 'category', v)}
+                        categories={categories}
+                        onAdd={addCategory}
+                        labelCase="lower"
                         className="border border-gray-200 rounded px-2 py-1 text-xs focus:outline-none"
-                      >
-                        {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
-                      </select>
+                      />
                       <div className="flex items-center gap-1 self-center">
                         <span className="text-xs text-gray-400">$</span>
                         <input

@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import ConversionPrompt from '../../components/common/ConversionPrompt'
-
-const CATEGORIES = ['produce', 'dairy', 'meat', 'frozen', 'pantry', 'beverages', 'snacks', 'other']
+import CategorySelect from '../../components/common/CategorySelect'
+import { useHousehold } from '../../hooks/useHousehold'
+import { useCategories } from '../../hooks/useCategories'
 const LOCATIONS = ['pantry', 'fridge', 'freezer', 'counter', 'shelf', 'other']
 const UNITS = ['count', 'lbs', 'oz', 'g', 'kg', 'cups', 'liters', 'ml', 'gallons', 'dozen', 'bunch', 'bag', 'box', 'can', 'bottle', 'jar']
 
@@ -27,6 +28,8 @@ export default function ItemForm({ initial, onSave, onClose, existingConversion,
     store_of_purchase: initial.store_of_purchase ?? '',
   } : DEFAULTS)
   const [loading, setLoading] = useState(false)
+  const { household } = useHousehold()
+  const { categories, addCategory } = useCategories(household?.id)
 
   function set(field, value) {
     setForm(f => ({ ...f, [field]: value }))
@@ -121,13 +124,13 @@ export default function ItemForm({ initial, onSave, onClose, existingConversion,
           <div className="flex gap-3">
             <div className="flex-1">
               <label className="text-xs font-medium text-gray-600 mb-1 block">Category *</label>
-              <select
+              <CategorySelect
                 value={form.category}
-                onChange={e => set('category', e.target.value)}
+                onChange={v => set('category', v)}
+                categories={categories}
+                onAdd={addCategory}
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none"
-              >
-                {CATEGORIES.map(c => <option key={c} value={c}>{c.charAt(0).toUpperCase() + c.slice(1)}</option>)}
-              </select>
+              />
             </div>
             <div className="flex-1">
               <label className="text-xs font-medium text-gray-600 mb-1 block">Location *</label>

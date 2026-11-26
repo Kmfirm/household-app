@@ -294,12 +294,33 @@ export function finalizeItem(item: any, catalog: CatalogRow | null) {
   return {
     quantity,
     unit,
+    // Number of separate packages bought (null for weighed items); used to split into one row each
+    purchase_count: soldByWeight ? null : bought,
     package_size: packageSize,
     package_unit: packageUnit,
     pack_count: packCount,
     unit_price: unitPrice,
     unit_price_unit: unitPriceUnit,
   }
+}
+
+// One pantry row per package: "2 × Almondmilk" becomes two rows, each with one
+// package's quantity and half the price. Weighed items are never split.
+const MAX_SPLIT = 24
+export function splitPurchases(items: any[]): any[] {
+  return items.flatMap(item => {
+    const n = num(item.purchase_count)
+    const qty = num(item.quantity)
+    if (!n || !Number.isInteger(n) || n < 2 || n > MAX_SPLIT || !qty) return [item]
+    const price = num(item.price)
+    const each = price ? Math.floor((price / n) * 100) / 100 : null
+    return Array.from({ length: n }, (_, i) => ({
+      ...item,
+      quantity: round(qty / n, 3),
+      // Last row absorbs rounding so the total still matches the receipt
+      price: each === null ? item.price : (i === n - 1 ? round(price! - each * (n - 1)) : each),
+    }))
+  })
 }
 
 // ---------- batch enrichment ----------

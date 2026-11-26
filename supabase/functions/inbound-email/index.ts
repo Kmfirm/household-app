@@ -3,7 +3,7 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.97.0'
 import { RECEIPT_MODEL, EMAIL_RECEIPT_PROMPT, callClaude, parseClaudeJson, splitReceiptLines } from '../_shared/receipt.ts'
-import { enrichItems } from '../_shared/products.ts'
+import { enrichItems, splitPurchases } from '../_shared/products.ts'
 
 const TOKEN_PATTERN = /\+([a-f0-9]{32})@/i
 const MAX_BODY_CHARS = 100_000
@@ -165,7 +165,8 @@ serve(async (req) => {
       return items
     })
 
-    const { error: itemsError } = await supabase.from('pantry_items').insert(enriched.map(item => ({
+    // Multiples ("2 × ...") become separate pantry items
+    const { error: itemsError } = await supabase.from('pantry_items').insert(splitPurchases(enriched).map(item => ({
       household_id: address.household_id,
       created_by: address.user_id,
       name: item.name,

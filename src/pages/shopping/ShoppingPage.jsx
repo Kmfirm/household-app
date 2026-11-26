@@ -2,8 +2,8 @@ import { useState } from 'react'
 import { useHousehold } from '../../hooks/useHousehold'
 import { usePantry } from '../../hooks/usePantry'
 import { useShoppingList } from '../../hooks/useShoppingList'
-
-const CATEGORIES = ['produce', 'dairy', 'meat', 'frozen', 'pantry', 'beverages', 'snacks', 'other']
+import { useCategories } from '../../hooks/useCategories'
+import CategorySelect from '../../components/common/CategorySelect'
 const UNITS = ['count', 'lbs', 'oz', 'g', 'kg', 'cups', 'liters', 'ml', 'gallons', 'dozen', 'bunch', 'bag', 'box', 'can', 'bottle', 'jar', 'tsp', 'tbsp']
 
 const EMPTY_FORM = { name: '', quantity: 1, unit: 'count', category: 'other', store: '' }
@@ -16,6 +16,7 @@ export default function ShoppingPage() {
     addItem, toggleChecked, deleteItem, clearChecked,
     generateFromMealPlan, addCheckedToPantry,
   } = useShoppingList(household?.id)
+  const { categories, addCategory } = useCategories(household?.id)
 
   const [showAddForm, setShowAddForm] = useState(false)
   const [form, setForm] = useState(EMPTY_FORM)
@@ -134,13 +135,16 @@ export default function ShoppingPage() {
             >
               {UNITS.map(u => <option key={u} value={u}>{u}</option>)}
             </select>
-            <select
-              value={form.category}
-              onChange={e => setForm(f => ({ ...f, category: e.target.value }))}
-              className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none"
-            >
-              {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
-            </select>
+            <div className="flex-1 min-w-0">
+              <CategorySelect
+                value={form.category}
+                onChange={v => setForm(f => ({ ...f, category: v }))}
+                categories={categories}
+                onAdd={addCategory}
+                labelCase="lower"
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none"
+              />
+            </div>
           </div>
           <input
             value={form.store}

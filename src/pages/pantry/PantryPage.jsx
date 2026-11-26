@@ -2,9 +2,9 @@ import { useState } from 'react'
 import { usePantry } from '../../hooks/usePantry'
 import { useHousehold } from '../../hooks/useHousehold'
 import { useUnitConversions } from '../../hooks/useUnitConversions'
+import { useCategories } from '../../hooks/useCategories'
 import ItemForm from './ItemForm'
 
-const CATEGORIES = ['produce', 'dairy', 'meat', 'frozen', 'pantry', 'beverages', 'snacks', 'other']
 const CATEGORY_COLORS = {
   produce: 'bg-green-100 text-green-700',
   dairy: 'bg-blue-100 text-blue-700',
@@ -119,6 +119,9 @@ export default function PantryPage() {
   const { household } = useHousehold()
   const { items, loading, addItem, updateItem, deleteItem, deleteItems } = usePantry(household?.id)
   const { getConversion, upsertConversion } = useUnitConversions(household?.id)
+  const { categories } = useCategories(household?.id)
+  // Also offer any category already on an item (e.g. one added on another device)
+  const filterCategories = [...new Set([...categories, ...items.map(i => i.category).filter(Boolean)])]
   const [search, setSearch] = useState('')
   const [filterCategory, setFilterCategory] = useState('all')
   const [sortBy, setSortBy] = useState('name')
@@ -230,7 +233,7 @@ export default function PantryPage() {
           className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none"
         >
           <option value="all">All</option>
-          {CATEGORIES.map(c => (
+          {filterCategories.map(c => (
             <option key={c} value={c}>{c.charAt(0).toUpperCase() + c.slice(1)}</option>
           ))}
         </select>
