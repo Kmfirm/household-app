@@ -3,10 +3,12 @@
 // writes to the database: the app shows the proposal and applies it after the user confirms.
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import Anthropic from 'npm:@anthropic-ai/sdk@1.14.0'
-import { betaZodOutputFormat } from 'npm:@anthropic-ai/sdk@1.14.0/helpers/beta/zod'
+import { zodOutputFormat } from 'npm:@anthropic-ai/sdk@1.14.0/helpers/zod'
 import { z } from 'npm:zod@4.6.7'
 
-const MODEL = 'claude-opus-5-5'
+// Cheapest current Claude model, run at low effort to keep per-message cost down
+const MODEL = 'claude-haiku-5-5'
+const EFFORT = 'low'
 const MAX_TURNS = 30
 const MAX_CHARS = 4000
 
@@ -74,7 +76,7 @@ serve(async (req) => {
     const { mode, messages, context } = await req.json()
     if (!Array.isArray(messages) || messages.length === 0) return json({ error: 'messages are required' }, 400)
 
-    const history: Anthropic.Beta.BetaMessageParam[] = messages
+    const history: Anthropic.MessageParam[] = messages
       .slice(-MAX_TURNS)
       .filter((m: any) => (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string' && m.content.trim())
       .map((m: any) => ({ role: m.role, content: m.content.slice(0, MAX_CHARS) }))
@@ -82,23 +84,29 @@ serve(async (req) => {
     while (history.length && history[0].role !== 'user') history.shift()
     if (!history.length) return json({ error: 'messages are required' }, 400)
 
-    const system = [
-      SYSTEM_PROMPT,
-      mode === 'slot' ? SLOT_PROMPT : '',
-      `Current context (JSON):\n${JSON.stringify(context ?? {})}`,
-    ].filter(Boolean).join('\n\n')
+    // Stable instructions first, then the planner state, so cached prefixes match across turns
+    const system: Anthropic.TextBlockParam[] = [
+      { type: 'text', text: mode === 'slot' ? `${SYSTEM_PROMPT}\n\n${SLOT_PROMPT}` : SYSTEM_PROMPT },
+      { type: 'text', text: `Current context (JSON):\n${JSON.stringify(context ?? {})}` },
+    ]
 
     const client = new Anthropic({ apiKey })
-    const response = await client.beta.messages.parse({
+    const response = await client.messages.parse({
       model: MODEL,
       max_tokens: 16000,
-      betas: ['server-side-fallback-2026-07-01'],
-      // If the model declines for safety reasons, the API retries on a fallback model automatically
-      fallbacks: 'default',
-      output_config: { effort: 'medium', format: betaZodOutputFormat(Response_) },
+      // Auto-caches the conversation so each follow-up message re-reads earlier turns at the cached rate
+      cache_control: { type: 'ephemeral' },
+      output_config: { effort: EFFORT, format: zodOutputFormat(Response_) },
       system,
       messages: history,
     })
+
+    console.log('meal-plan-ai usage', JSON.stringify({
+      input: response.usage.input_tokens,
+      cache_read: response.usage.cache_read_input_tokens,
+      cache_write: response.usage.cache_creation_input_tokens,
+      output: response.usage.output_tokens,
+    }))
 
     if (response.stop_reason === 'refusal') {
       return json({ reply: "Sorry, I can't help with that one. Try rephrasing what you'd like to change.", actions: [] })
