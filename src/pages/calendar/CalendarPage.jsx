@@ -1,12 +1,14 @@
 import { useState, useMemo, useRef, useEffect } from 'react'
 import {
-  DndContext, DragOverlay, MouseSensor, TouchSensor, useSensor, useSensors, useDraggable, useDroppable,
+  DndContext, DragOverlay, MouseSensor, TouchSensor, useSensor, useSensors, useDraggable, useDroppable, closestCenter,
 } from '@dnd-kit/core'
+import { SortableContext, useSortable, verticalListSortingStrategy, arrayMove } from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
 import { useHousehold } from '../../hooks/useHousehold'
 import { useRecipes } from '../../hooks/useRecipes'
 import { usePantry } from '../../hooks/usePantry'
 import { useMealPlan, getWeekStart, toDateStr, fromDateStr } from '../../hooks/useMealPlan'
-import { useMealTypes } from '../../hooks/useMealTypes'
+import { useMealTypes, DEFAULT_MEAL_TYPES } from '../../hooks/useMealTypes'
 import { useShoppingList } from '../../hooks/useShoppingList'
 import { useUnitConversions } from '../../hooks/useUnitConversions'
 import { applyMealPlanActions, deductForMeal } from '../../lib/mealPlanActions'
@@ -22,14 +24,17 @@ const ROW_COLORS = {
 }
 const EXTRA_COLOR = 'bg-purple-50 border-purple-200 text-purple-900'
 const VIEW_KEY = 'mealPlanView'
+const INVERT_KEY = 'mealPlanInverted'
 const cellId = (date, mealType) => `${date}|${mealType}`
 
-function loadView() {
-  try { return localStorage.getItem(VIEW_KEY) === 'day' ? 'day' : 'week' } catch { return 'week' }
+function loadPref(key) {
+  try { return localStorage.getItem(key) } catch { return null }
 }
-function saveView(view) {
-  try { localStorage.setItem(VIEW_KEY, view) } catch { /* private mode etc. */ }
+function savePref(key, value) {
+  try { localStorage.setItem(key, value) } catch { /* private mode etc. */ }
 }
+const loadView = () => (loadPref(VIEW_KEY) === 'day' ? 'day' : 'week')
+const saveView = view => savePref(VIEW_KEY, view)
 
 function addDays(dateStr, n) {
   const d = fromDateStr(dateStr)
@@ -94,13 +99,39 @@ function DroppableCell({ id, isToday, children, onAdd, className = '' }) {
   )
 }
 
-function ViewOptions({ view, onViewChange, rows, extraRows, onReorder, onClose }) {
-  async function move(i, dir) {
-    const j = i + dir
-    if (j < 0 || j >= rows.length) return
-    const next = [...rows]
-    ;[next[i], next[j]] = [next[j], next[i]]
-    await onReorder(next)
+function SortableRow({ row, builtIn }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: row })
+  return (
+    <div
+      ref={setNodeRef}
+      style={{ transform: CSS.Transform.toString(transform), transition }}
+      className={`flex items-center gap-2 border rounded-lg px-2 py-1.5 bg-white ${isDragging ? 'border-green-400 shadow-md relative z-10' : 'border-gray-200'}`}
+    >
+      <button
+        {...attributes}
+        {...listeners}
+        className="touch-none cursor-grab active:cursor-grabbing text-gray-400 hover:text-gray-600 px-1 text-base leading-none"
+        aria-label={`Drag to reorder ${row}`}
+      >
+        ⠿
+      </button>
+      <span className="flex-1 text-sm capitalize text-gray-700">
+        {row}
+        {builtIn && <span className="text-[11px] text-gray-400 normal-case"> · built-in</span>}
+      </span>
+    </div>
+  )
+}
+
+function ViewOptions({ view, onViewChange, inverted, onInvertChange, rows, builtInRows, onReorder, onClose }) {
+  const sensors = useSensors(
+    useSensor(MouseSensor, { activationConstraint: { distance: 4 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 120, tolerance: 6 } }),
+  )
+
+  function handleDragEnd({ active, over }) {
+    if (!over || active.id === over.id) return
+    onReorder(arrayMove(rows, rows.indexOf(active.id), rows.indexOf(over.id)))
   }
 
   return (
@@ -123,36 +154,38 @@ function ViewOptions({ view, onViewChange, rows, extraRows, onReorder, onClose }
             </button>
           ))}
         </div>
-        <p className="text-[11px] text-gray-400 mb-5">Saved on this device.</p>
+        <label className={`flex items-center justify-between gap-3 mt-3 text-sm ${view === 'week' ? 'text-gray-700' : 'text-gray-400'}`}>
+          <span>
+            Invert week grid
+            <span className="block text-[11px] text-gray-400">Days down the side, meals across the top</span>
+          </span>
+          <input
+            type="checkbox"
+            checked={inverted}
+            disabled={view !== 'week'}
+            onChange={e => onInvertChange(e.target.checked)}
+            className="accent-green-600 w-4 h-4"
+          />
+        </label>
+        <p className="text-[11px] text-gray-400 mt-2 mb-5">Layout settings are saved on this device.</p>
 
-        <p className="text-xs font-medium text-gray-600 mb-1.5">Meal row order</p>
-        <div className="flex flex-col gap-1">
-          {rows.map((row, i) => (
-            <div key={row} className="flex items-center gap-2 border border-gray-200 rounded-lg px-3 py-1.5">
-              <span className="flex-1 text-sm capitalize text-gray-700">
-                {row}
-                {!extraRows.includes(row) && <span className="text-[11px] text-gray-400 normal-case"> · built-in</span>}
-              </span>
-              <button
-                onClick={() => move(i, -1)}
-                disabled={i === 0}
-                className="text-gray-500 hover:text-gray-800 disabled:opacity-20 px-1.5"
-                aria-label={`Move ${row} up`}
-              >
-                ↑
-              </button>
-              <button
-                onClick={() => move(i, 1)}
-                disabled={i === rows.length - 1}
-                className="text-gray-500 hover:text-gray-800 disabled:opacity-20 px-1.5"
-                aria-label={`Move ${row} down`}
-              >
-                ↓
-              </button>
-            </div>
-          ))}
+        <div className="flex items-center justify-between mb-1.5">
+          <p className="text-xs font-medium text-gray-600">Meal order · drag to rearrange</p>
+          <button
+            onClick={() => onReorder([...rows].reverse())}
+            className="text-xs text-green-600 hover:text-green-800 font-medium"
+          >
+            ⇅ Reverse
+          </button>
         </div>
-        <p className="text-[11px] text-gray-400 mt-1.5">Shared with everyone in your household.</p>
+        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+          <SortableContext items={rows} strategy={verticalListSortingStrategy}>
+            <div className="flex flex-col gap-1">
+              {rows.map(row => <SortableRow key={row} row={row} builtIn={builtInRows.includes(row)} />)}
+            </div>
+          </SortableContext>
+        </DndContext>
+        <p className="text-[11px] text-gray-400 mt-1.5">Meal order is shared with everyone in your household.</p>
       </div>
     </div>
   )
@@ -170,6 +203,7 @@ export default function CalendarPage() {
 
   const today = toDateStr(new Date())
   const [view, setView] = useState(loadView)
+  const [inverted, setInverted] = useState(() => loadPref(INVERT_KEY) === '1')
   const [selectedDay, setSelectedDay] = useState(today)
   const [showViewOptions, setShowViewOptions] = useState(false)
   const [assignSlot, setAssignSlot] = useState(null) // { date: Date, mealType }
@@ -345,10 +379,15 @@ export default function CalendarPage() {
     setAddingRow(false)
   }
 
+  // Saves every visible row, so meal types that were only in use (like an old "snack") become regular rows
   async function handleReorder(next) {
-    // Only household rows are stored; one-off meal types used this week stay at the bottom
-    const { error } = await reorderMealTypes(next.filter(r => mealTypes.includes(r)))
-    if (error) showToast(`Couldn't save row order: ${error.message}`)
+    const { error } = await reorderMealTypes(next)
+    if (error) showToast(`Couldn't save meal order: ${error.message}`)
+  }
+
+  function changeInverted(value) {
+    setInverted(value)
+    savePref(INVERT_KEY, value ? '1' : '0')
   }
 
   // What the AI sees about the planner
@@ -430,6 +469,66 @@ export default function CalendarPage() {
             })}
           </div>
         ))}
+      </div>
+    </div>
+  )
+
+  // Inverted week: days down the side, meal rows across the top
+  const invertedGrid = (
+    <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white shadow-sm">
+      <div
+        className="grid"
+        style={{
+          gridTemplateColumns: `5.5rem repeat(${rows.length}, minmax(8rem, 1fr))`,
+          minWidth: `${5.5 + rows.length * 8}rem`,
+        }}
+      >
+        <div className="sticky left-0 z-10 bg-gray-50" />
+        {rows.map(row => (
+          <div key={row} className="px-2 py-2 border-l border-gray-100 bg-gray-50 flex items-center justify-center gap-1">
+            <span className="text-xs font-semibold text-gray-700 capitalize">{row}</span>
+            {rowRemovable(row) && (
+              <button onClick={() => removeMealType(row)} className="text-[11px] text-gray-300 hover:text-red-500" aria-label={`Remove ${row} row`}>
+                ✕
+              </button>
+            )}
+          </div>
+        ))}
+
+        {days.map((d, i) => {
+          const ds = dayStrs[i]
+          const isToday = ds === today
+          return (
+            <div key={ds} className="contents">
+              <button
+                onClick={() => changeViewTo('day', ds)}
+                className={`sticky left-0 z-10 border-t border-gray-100 px-2 py-2 text-left hover:bg-gray-100 ${isToday ? 'bg-green-50' : 'bg-white'}`}
+                title="Open day view"
+              >
+                <p className={`text-xs font-semibold ${isToday ? 'text-green-700' : 'text-gray-700'}`}>{DAY_NAMES[i]}</p>
+                <p className={`text-[11px] ${isToday ? 'text-green-600' : 'text-gray-400'}`}>
+                  {d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                </p>
+              </button>
+              {rows.map(row => {
+                const id = cellId(ds, row)
+                return (
+                  <DroppableCell
+                    key={id}
+                    id={id}
+                    isToday={isToday}
+                    onAdd={() => setAssignSlot({ date: d, mealType: row })}
+                    className="min-h-[4rem] p-1 border-l border-t border-gray-100"
+                  >
+                    {(plansBySlot[id] ?? []).map(plan => (
+                      <DraggableMeal key={plan.id} plan={plan} onOpen={() => openMeal(plan.id)} />
+                    ))}
+                  </DroppableCell>
+                )
+              })}
+            </div>
+          )
+        })}
       </div>
     </div>
   )
@@ -531,7 +630,7 @@ export default function CalendarPage() {
           onDragCancel={() => setActiveDragId(null)}
           onDragEnd={handleDragEnd}
         >
-          {view === 'day' ? dayView : weekGrid}
+          {view === 'day' ? dayView : inverted ? invertedGrid : weekGrid}
 
           <DragOverlay dropAnimation={null}>
             {activePlan ? <div className={view === 'day' ? 'w-64' : 'w-32'}><MealCard plan={activePlan} dragging large={view === 'day'} /></div> : null}
@@ -574,8 +673,10 @@ export default function CalendarPage() {
         <ViewOptions
           view={view}
           onViewChange={changeView}
-          rows={mealTypes}
-          extraRows={extraMealTypes}
+          inverted={inverted}
+          onInvertChange={changeInverted}
+          rows={rows}
+          builtInRows={DEFAULT_MEAL_TYPES}
           onReorder={handleReorder}
           onClose={() => setShowViewOptions(false)}
         />
