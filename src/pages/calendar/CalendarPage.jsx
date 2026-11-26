@@ -1,11 +1,11 @@
-import { useState, useMemo, useRef } from 'react'
+import { useState, useMemo, useRef, useEffect } from 'react'
 import {
   DndContext, DragOverlay, MouseSensor, TouchSensor, useSensor, useSensors, useDraggable, useDroppable,
 } from '@dnd-kit/core'
 import { useHousehold } from '../../hooks/useHousehold'
 import { useRecipes } from '../../hooks/useRecipes'
 import { usePantry } from '../../hooks/usePantry'
-import { useMealPlan, getWeekStart, toDateStr } from '../../hooks/useMealPlan'
+import { useMealPlan, getWeekStart, toDateStr, fromDateStr } from '../../hooks/useMealPlan'
 import { useMealTypes } from '../../hooks/useMealTypes'
 import { useShoppingList } from '../../hooks/useShoppingList'
 import { useUnitConversions } from '../../hooks/useUnitConversions'
@@ -21,46 +21,64 @@ const ROW_COLORS = {
   dinner: 'bg-green-50 border-green-200 text-green-900',
 }
 const EXTRA_COLOR = 'bg-purple-50 border-purple-200 text-purple-900'
+const VIEW_KEY = 'mealPlanView'
 const cellId = (date, mealType) => `${date}|${mealType}`
 
-function MealCard({ plan, onOpen, dragging = false }) {
+function loadView() {
+  try { return localStorage.getItem(VIEW_KEY) === 'day' ? 'day' : 'week' } catch { return 'week' }
+}
+function saveView(view) {
+  try { localStorage.setItem(VIEW_KEY, view) } catch { /* private mode etc. */ }
+}
+
+function addDays(dateStr, n) {
+  const d = fromDateStr(dateStr)
+  d.setDate(d.getDate() + n)
+  return toDateStr(d)
+}
+
+function MealCard({ plan, onOpen, dragging = false, large = false }) {
   const scale = plan.scale ?? 1
   return (
     <div
       onClick={onOpen}
-      className={`rounded-lg border px-2 py-1.5 text-xs cursor-pointer select-none ${ROW_COLORS[plan.meal_type] ?? EXTRA_COLOR} ${
-        plan.cooked ? 'opacity-60' : ''
-      } ${dragging ? 'shadow-lg ring-2 ring-green-400 rotate-1' : 'hover:shadow-sm'}`}
+      className={`rounded-lg border cursor-pointer select-none ${large ? 'px-3 py-2.5 text-sm' : 'px-2 py-1.5 text-xs'} ${
+        ROW_COLORS[plan.meal_type] ?? EXTRA_COLOR
+      } ${plan.cooked ? 'opacity-60' : ''} ${dragging ? 'shadow-lg ring-2 ring-green-400 rotate-1' : 'hover:shadow-sm'}`}
     >
-      <p className={`font-semibold leading-snug line-clamp-2 ${plan.cooked ? 'line-through' : ''}`}>
+      <p className={`font-semibold leading-snug ${large ? '' : 'line-clamp-2'} ${plan.cooked ? 'line-through' : ''}`}>
         {plan.recipes?.name ?? 'Leftovers'}
       </p>
-      {(scale !== 1 || plan.cooked) && (
-        <p className="opacity-70 mt-0.5">
-          {scale !== 1 ? (scale === 0.5 ? '½x' : `${scale}x`) : ''}
-          {scale !== 1 && plan.cooked ? ' · ' : ''}
-          {plan.cooked ? '✓ cooked' : ''}
+      {(scale !== 1 || plan.cooked || (large && plan.recipes?.total_servings)) && (
+        <p className="opacity-70 mt-0.5 text-xs">
+          {[
+            scale !== 1 ? (scale === 0.5 ? '½x' : `${scale}x`) : null,
+            large && plan.recipes?.total_servings
+              ? `${Math.round(plan.recipes.total_servings * scale * 10) / 10} servings`
+              : null,
+            plan.cooked ? '✓ cooked' : null,
+          ].filter(Boolean).join(' · ')}
         </p>
       )}
     </div>
   )
 }
 
-function DraggableMeal({ plan, onOpen }) {
+function DraggableMeal({ plan, onOpen, large }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: plan.id })
   return (
     <div ref={setNodeRef} {...attributes} {...listeners} className={`touch-manipulation ${isDragging ? 'opacity-30' : ''}`}>
-      <MealCard plan={plan} onOpen={onOpen} />
+      <MealCard plan={plan} onOpen={onOpen} large={large} />
     </div>
   )
 }
 
-function DroppableCell({ id, isToday, children, onAdd }) {
+function DroppableCell({ id, isToday, children, onAdd, className = '' }) {
   const { setNodeRef, isOver } = useDroppable({ id })
   return (
     <div
       ref={setNodeRef}
-      className={`group min-h-[4.5rem] p-1 flex flex-col gap-1 border-l border-t border-gray-100 transition-colors ${
+      className={`group flex flex-col gap-1 transition-colors ${className} ${
         isOver ? 'bg-green-100' : isToday ? 'bg-green-50/40' : 'bg-white'
       }`}
     >
@@ -76,6 +94,70 @@ function DroppableCell({ id, isToday, children, onAdd }) {
   )
 }
 
+function ViewOptions({ view, onViewChange, rows, extraRows, onReorder, onClose }) {
+  async function move(i, dir) {
+    const j = i + dir
+    if (j < 0 || j >= rows.length) return
+    const next = [...rows]
+    ;[next[i], next[j]] = [next[j], next[i]]
+    await onReorder(next)
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-end md:items-center justify-center z-50 p-4" onClick={onClose}>
+      <div className="bg-white rounded-2xl w-full max-w-sm p-5" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-bold text-gray-800">View options</h2>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl leading-none">✕</button>
+        </div>
+
+        <p className="text-xs font-medium text-gray-600 mb-1.5">Layout</p>
+        <div className="flex gap-1 bg-gray-100 rounded-lg p-1 mb-1">
+          {[['week', 'Week'], ['day', 'Day']].map(([key, label]) => (
+            <button
+              key={key}
+              onClick={() => onViewChange(key)}
+              className={`flex-1 text-sm font-medium py-1.5 rounded-md ${view === key ? 'bg-white shadow-sm text-gray-800' : 'text-gray-500'}`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <p className="text-[11px] text-gray-400 mb-5">Saved on this device.</p>
+
+        <p className="text-xs font-medium text-gray-600 mb-1.5">Meal row order</p>
+        <div className="flex flex-col gap-1">
+          {rows.map((row, i) => (
+            <div key={row} className="flex items-center gap-2 border border-gray-200 rounded-lg px-3 py-1.5">
+              <span className="flex-1 text-sm capitalize text-gray-700">
+                {row}
+                {!extraRows.includes(row) && <span className="text-[11px] text-gray-400 normal-case"> · built-in</span>}
+              </span>
+              <button
+                onClick={() => move(i, -1)}
+                disabled={i === 0}
+                className="text-gray-500 hover:text-gray-800 disabled:opacity-20 px-1.5"
+                aria-label={`Move ${row} up`}
+              >
+                ↑
+              </button>
+              <button
+                onClick={() => move(i, 1)}
+                disabled={i === rows.length - 1}
+                className="text-gray-500 hover:text-gray-800 disabled:opacity-20 px-1.5"
+                aria-label={`Move ${row} down`}
+              >
+                ↓
+              </button>
+            </div>
+          ))}
+        </div>
+        <p className="text-[11px] text-gray-400 mt-1.5">Shared with everyone in your household.</p>
+      </div>
+    </div>
+  )
+}
+
 export default function CalendarPage() {
   const { household } = useHousehold()
   const { recipes, addRecipe } = useRecipes(household?.id)
@@ -83,9 +165,13 @@ export default function CalendarPage() {
   const { conversions } = useUnitConversions(household?.id)
   const [weekStart, setWeekStart] = useState(getWeekStart())
   const { plans, loading, addMeal, updateMeal, removeMeal } = useMealPlan(household?.id, weekStart)
-  const { mealTypes, extraMealTypes, addMealType, removeMealType } = useMealTypes(household?.id)
+  const { mealTypes, extraMealTypes, addMealType, removeMealType, reorderMealTypes } = useMealTypes(household?.id)
   const { addItem: addToShoppingList } = useShoppingList(household?.id)
 
+  const today = toDateStr(new Date())
+  const [view, setView] = useState(loadView)
+  const [selectedDay, setSelectedDay] = useState(today)
+  const [showViewOptions, setShowViewOptions] = useState(false)
   const [assignSlot, setAssignSlot] = useState(null) // { date: Date, mealType }
   const [openPlanId, setOpenPlanId] = useState(null)
   const [cookingIds, setCookingIds] = useState(new Set())
@@ -95,12 +181,20 @@ export default function CalendarPage() {
   const [addingRow, setAddingRow] = useState(false)
   const [newRowName, setNewRowName] = useState('')
   const justDragged = useRef(false)
+  const touchStartX = useRef(null)
 
   const sensors = useSensors(
     useSensor(MouseSensor, { activationConstraint: { distance: 6 } }),
     // Long-press to drag on touch screens so normal scrolling still works
     useSensor(TouchSensor, { activationConstraint: { delay: 220, tolerance: 8 } }),
   )
+
+  // Keep the loaded week in step with the selected day in day view
+  useEffect(() => {
+    if (view !== 'day') return
+    const ws = getWeekStart(fromDateStr(selectedDay))
+    if (toDateStr(ws) !== toDateStr(weekStart)) setWeekStart(ws)
+  }, [view, selectedDay])
 
   // Ingredient names used across recipes, most common first (for the recipe form's suggestions)
   const allIngredients = useMemo(() => {
@@ -121,9 +215,8 @@ export default function CalendarPage() {
     return d
   })
   const dayStrs = days.map(toDateStr)
-  const today = toDateStr(new Date())
 
-  // Rows: breakfast/lunch/dinner, the household's extra rows, plus any other meal type used this week
+  // Rows: the household's ordered rows, plus any other meal type used this week
   const rows = useMemo(() => {
     const used = plans.map(p => p.meal_type).filter(t => t && !mealTypes.includes(t))
     return [...mealTypes, ...new Set(used)]
@@ -143,16 +236,51 @@ export default function CalendarPage() {
     setTimeout(() => setToast(null), ms)
   }
 
-  function shiftWeek(days) {
+  function changeView(next) {
+    setView(next)
+    saveView(next)
+    if (next === 'day') {
+      // Open on today if it's in the week being viewed, otherwise the first day of that week
+      setSelectedDay(dayStrs.includes(today) ? today : dayStrs[0])
+    }
+  }
+
+  function goPrev() {
+    if (view === 'day') setSelectedDay(d => addDays(d, -1))
+    else shiftWeek(-7)
+  }
+  function goNext() {
+    if (view === 'day') setSelectedDay(d => addDays(d, 1))
+    else shiftWeek(7)
+  }
+  function goToday() {
+    setWeekStart(getWeekStart())
+    setSelectedDay(today)
+  }
+
+  function shiftWeek(n) {
     const d = new Date(weekStart)
-    d.setDate(d.getDate() + days)
+    d.setDate(d.getDate() + n)
     setWeekStart(d)
   }
 
   function weekLabel() {
-    const end = days[6]
     const fmt = d => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-    return `${fmt(days[0])} – ${fmt(end)}`
+    return `${fmt(days[0])} – ${fmt(days[6])}`
+  }
+
+  function navLabel() {
+    if (view === 'week') return weekLabel()
+    return fromDateStr(selectedDay).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
+  }
+
+  // Swipe left/right to change day in day view
+  function onTouchStart(e) { touchStartX.current = e.touches[0].clientX }
+  function onTouchEnd(e) {
+    if (touchStartX.current === null || activeDragId) return
+    const dx = e.changedTouches[0].clientX - touchStartX.current
+    touchStartX.current = null
+    if (Math.abs(dx) > 70) (dx < 0 ? goNext : goPrev)()
   }
 
   function handleDragEnd({ active, over }) {
@@ -217,11 +345,18 @@ export default function CalendarPage() {
     setAddingRow(false)
   }
 
+  async function handleReorder(next) {
+    // Only household rows are stored; one-off meal types used this week stay at the bottom
+    const { error } = await reorderMealTypes(next.filter(r => mealTypes.includes(r)))
+    if (error) showToast(`Couldn't save row order: ${error.message}`)
+  }
+
   // What the AI sees about the planner
   function aiContext() {
     return {
       today,
       week: dayStrs.map((date, i) => ({ date, weekday: DAY_NAMES[i] })),
+      ...(view === 'day' ? { viewing_day: selectedDay } : {}),
       meal_rows: rows,
       meals: plans.map(p => ({
         id: p.id,
@@ -242,17 +377,141 @@ export default function CalendarPage() {
     })
   }
 
+  const rowRemovable = row =>
+    extraMealTypes.includes(row) && !dayStrs.some(ds => plansBySlot[cellId(ds, row)]?.length)
+
+  const weekGrid = (
+    // The grid scrolls sideways on narrow screens; the meal labels stay pinned
+    <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white shadow-sm">
+      <div className="grid min-w-[52rem]" style={{ gridTemplateColumns: '5.5rem repeat(7, minmax(0, 1fr))' }}>
+        <div className="sticky left-0 z-10 bg-gray-50" />
+        {days.map((d, i) => {
+          const isToday = dayStrs[i] === today
+          return (
+            <button
+              key={dayStrs[i]}
+              onClick={() => changeViewTo('day', dayStrs[i])}
+              className={`px-2 py-2 border-l border-gray-100 text-center hover:bg-gray-100 ${isToday ? 'bg-green-50' : 'bg-gray-50'}`}
+              title="Open day view"
+            >
+              <p className={`text-xs font-semibold ${isToday ? 'text-green-700' : 'text-gray-700'}`}>{DAY_NAMES[i]}</p>
+              <p className={`text-[11px] ${isToday ? 'text-green-600' : 'text-gray-400'}`}>
+                {d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+              </p>
+            </button>
+          )
+        })}
+
+        {rows.map(row => (
+          <div key={row} className="contents">
+            <div className="sticky left-0 z-10 bg-white border-t border-gray-100 px-2 py-2 flex items-start justify-between gap-1">
+              <span className="text-xs font-semibold text-gray-600 capitalize break-words">{row}</span>
+              {rowRemovable(row) && (
+                <button onClick={() => removeMealType(row)} className="text-[11px] text-gray-300 hover:text-red-500" aria-label={`Remove ${row} row`}>
+                  ✕
+                </button>
+              )}
+            </div>
+            {days.map((d, i) => {
+              const id = cellId(dayStrs[i], row)
+              return (
+                <DroppableCell
+                  key={id}
+                  id={id}
+                  isToday={dayStrs[i] === today}
+                  onAdd={() => setAssignSlot({ date: d, mealType: row })}
+                  className="min-h-[4.5rem] p-1 border-l border-t border-gray-100"
+                >
+                  {(plansBySlot[id] ?? []).map(plan => (
+                    <DraggableMeal key={plan.id} plan={plan} onOpen={() => openMeal(plan.id)} />
+                  ))}
+                </DroppableCell>
+              )
+            })}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+
+  function changeViewTo(next, day) {
+    setView(next)
+    saveView(next)
+    if (day) setSelectedDay(day)
+  }
+
+  const dayView = (
+    <div onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
+      {/* Day picker for the week */}
+      <div className="grid grid-cols-7 gap-1 mb-3">
+        {days.map((d, i) => {
+          const ds = dayStrs[i]
+          const selected = ds === selectedDay
+          const count = plans.filter(p => p.date === ds).length
+          return (
+            <button
+              key={ds}
+              onClick={() => setSelectedDay(ds)}
+              className={`rounded-lg py-1.5 text-center border ${
+                selected ? 'bg-green-600 border-green-600 text-white' : ds === today ? 'border-green-300 bg-green-50 text-green-700' : 'border-gray-200 bg-white text-gray-600'
+              }`}
+            >
+              <p className="text-[11px] font-medium">{DAY_NAMES[i]}</p>
+              <p className="text-sm font-semibold leading-tight">{d.getDate()}</p>
+              <p className={`text-[10px] ${selected ? 'text-green-100' : 'text-gray-400'}`}>{count ? `${count} meal${count !== 1 ? 's' : ''}` : '·'}</p>
+            </button>
+          )
+        })}
+      </div>
+
+      <div className="flex flex-col gap-2">
+        {rows.map(row => {
+          const id = cellId(selectedDay, row)
+          return (
+            <div key={row} className="rounded-xl border border-gray-200 bg-white shadow-sm overflow-hidden">
+              <div className="flex items-center justify-between px-3 pt-2">
+                <span className="text-xs font-semibold text-gray-600 capitalize">{row}</span>
+                {rowRemovable(row) && (
+                  <button onClick={() => removeMealType(row)} className="text-[11px] text-gray-300 hover:text-red-500" aria-label={`Remove ${row} row`}>
+                    ✕
+                  </button>
+                )}
+              </div>
+              <DroppableCell
+                id={id}
+                isToday={false}
+                onAdd={() => setAssignSlot({ date: fromDateStr(selectedDay), mealType: row })}
+                className="min-h-[3.5rem] px-2 pb-2 pt-1"
+              >
+                {(plansBySlot[id] ?? []).map(plan => (
+                  <DraggableMeal key={plan.id} plan={plan} onOpen={() => openMeal(plan.id)} large />
+                ))}
+              </DroppableCell>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+
   return (
     <div>
       {/* Header */}
       <div className="flex items-center justify-between gap-2 mb-4 flex-wrap">
         <h1 className="text-xl font-bold text-gray-800">Meal Plan</h1>
         <div className="flex items-center gap-1 text-sm">
-          <button onClick={() => shiftWeek(-7)} className="px-2 py-1 rounded hover:bg-gray-100 text-gray-600" aria-label="Previous week">‹</button>
-          <span className="text-gray-600 text-xs">{weekLabel()}</span>
-          <button onClick={() => shiftWeek(7)} className="px-2 py-1 rounded hover:bg-gray-100 text-gray-600" aria-label="Next week">›</button>
-          <button onClick={() => setWeekStart(getWeekStart())} className="ml-1 text-xs px-2 py-1 rounded border border-gray-200 text-gray-600 hover:bg-gray-50">
+          <button onClick={goPrev} className="px-2 py-1 rounded hover:bg-gray-100 text-gray-600" aria-label={view === 'day' ? 'Previous day' : 'Previous week'}>‹</button>
+          <span className="text-gray-600 text-xs min-w-[6.5rem] text-center">{navLabel()}</span>
+          <button onClick={goNext} className="px-2 py-1 rounded hover:bg-gray-100 text-gray-600" aria-label={view === 'day' ? 'Next day' : 'Next week'}>›</button>
+          <button onClick={goToday} className="ml-1 text-xs px-2 py-1 rounded border border-gray-200 text-gray-600 hover:bg-gray-50">
             Today
+          </button>
+          <button
+            onClick={() => setShowViewOptions(true)}
+            className="ml-1 text-xs px-2 py-1 rounded border border-gray-200 text-gray-600 hover:bg-gray-50"
+            aria-label="View options"
+          >
+            ⚙ View
           </button>
           <button
             onClick={() => setShowAssistant(true)}
@@ -272,67 +531,10 @@ export default function CalendarPage() {
           onDragCancel={() => setActiveDragId(null)}
           onDragEnd={handleDragEnd}
         >
-          {/* The grid scrolls sideways on narrow screens; the meal labels stay pinned */}
-          <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white shadow-sm">
-            <div
-              className="grid min-w-[52rem]"
-              style={{ gridTemplateColumns: '5.5rem repeat(7, minmax(0, 1fr))' }}
-            >
-              {/* Day headers */}
-              <div className="sticky left-0 z-10 bg-gray-50" />
-              {days.map((d, i) => {
-                const isToday = dayStrs[i] === today
-                return (
-                  <div key={dayStrs[i]} className={`px-2 py-2 border-l border-gray-100 text-center ${isToday ? 'bg-green-50' : 'bg-gray-50'}`}>
-                    <p className={`text-xs font-semibold ${isToday ? 'text-green-700' : 'text-gray-700'}`}>{DAY_NAMES[i]}</p>
-                    <p className={`text-[11px] ${isToday ? 'text-green-600' : 'text-gray-400'}`}>
-                      {d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-                    </p>
-                  </div>
-                )
-              })}
-
-              {/* Meal rows */}
-              {rows.map(row => {
-                const rowHasMeals = dayStrs.some(ds => plansBySlot[cellId(ds, row)]?.length)
-                const removable = extraMealTypes.includes(row) && !rowHasMeals
-                return (
-                  <div key={row} className="contents">
-                    <div className="sticky left-0 z-10 bg-white border-t border-gray-100 px-2 py-2 flex items-start justify-between gap-1">
-                      <span className="text-xs font-semibold text-gray-600 capitalize break-words">{row}</span>
-                      {removable && (
-                        <button
-                          onClick={() => removeMealType(row)}
-                          className="text-[11px] text-gray-300 hover:text-red-500"
-                          aria-label={`Remove ${row} row`}
-                        >
-                          ✕
-                        </button>
-                      )}
-                    </div>
-                    {days.map((d, i) => {
-                      const id = cellId(dayStrs[i], row)
-                      return (
-                        <DroppableCell
-                          key={id}
-                          id={id}
-                          isToday={dayStrs[i] === today}
-                          onAdd={() => setAssignSlot({ date: d, mealType: row })}
-                        >
-                          {(plansBySlot[id] ?? []).map(plan => (
-                            <DraggableMeal key={plan.id} plan={plan} onOpen={() => openMeal(plan.id)} />
-                          ))}
-                        </DroppableCell>
-                      )
-                    })}
-                  </div>
-                )
-              })}
-            </div>
-          </div>
+          {view === 'day' ? dayView : weekGrid}
 
           <DragOverlay dropAnimation={null}>
-            {activePlan ? <div className="w-32"><MealCard plan={activePlan} dragging /></div> : null}
+            {activePlan ? <div className={view === 'day' ? 'w-64' : 'w-32'}><MealCard plan={activePlan} dragging large={view === 'day'} /></div> : null}
           </DragOverlay>
         </DndContext>
       )}
@@ -357,13 +559,26 @@ export default function CalendarPage() {
             + Add meal row
           </button>
         )}
-        <p className="text-[11px] text-gray-400 ml-auto">Drag meals to move them · long-press on touch screens</p>
+        <p className="text-[11px] text-gray-400 ml-auto">
+          {view === 'day' ? 'Swipe to change day · long-press a meal to drag' : 'Drag meals to move them · tap a day for day view'}
+        </p>
       </div>
 
       {toast && (
         <div className="fixed bottom-20 left-4 right-4 md:left-auto md:right-6 md:max-w-sm bg-gray-800 text-white text-sm rounded-xl px-4 py-3 shadow-lg z-50">
           {toast}
         </div>
+      )}
+
+      {showViewOptions && (
+        <ViewOptions
+          view={view}
+          onViewChange={changeView}
+          rows={mealTypes}
+          extraRows={extraMealTypes}
+          onReorder={handleReorder}
+          onClose={() => setShowViewOptions(false)}
+        />
       )}
 
       {openPlan && (
