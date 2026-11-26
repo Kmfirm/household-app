@@ -1,5 +1,7 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.97.0'
 import { RECEIPT_MODEL, IMAGE_RECEIPT_PROMPT, callClaude, parseClaudeJson, splitReceiptLines } from '../_shared/receipt.ts'
+import { enrichItems } from '../_shared/products.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -31,7 +33,7 @@ serve(async (req) => {
 
     const { data: claudeData, error: claudeError } = await callClaude(apiKey, {
       model: RECEIPT_MODEL,
-      max_tokens: 2048,
+      max_tokens: 8192,
       messages: [{
         role: 'user',
         content: [
@@ -64,7 +66,16 @@ serve(async (req) => {
       )
     }
 
-    const { items, discounts } = splitReceiptLines(parsed)
+    const { items: parsedItems, discounts } = splitReceiptLines(parsed)
+
+    // Package size, unit price and nutrition lookups; keeps the parsed items if anything goes wrong
+    let items = parsedItems
+    try {
+      const supabase = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!)
+      items = await enrichItems(supabase, parsedItems)
+    } catch (err) {
+      console.error('enrichment failed:', (err as Error).message)
+    }
     const store_name = parsed.store_name ?? null
     const purchase_date = parsed.purchase_date ?? null
 

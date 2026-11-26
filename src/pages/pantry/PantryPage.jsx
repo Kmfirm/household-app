@@ -52,6 +52,57 @@ function remaining(item) {
   return { label: `${formatQty(qty)} of ${formatQty(bought)} ${item.unit} left`, pct }
 }
 
+function formatUnitPrice(item) {
+  const p = Number(item.unit_price)
+  if (!p || !item.unit_price_unit) return null
+  // Tiny per-fl-oz prices read better with three decimals
+  const digits = p < 0.1 ? 3 : 2
+  return `$${p.toFixed(digits)}/${item.unit_price_unit}`
+}
+
+function formatPackage(item) {
+  const size = Number(item.package_size)
+  const count = Number(item.pack_count)
+  const sizeText = size && item.package_unit ? `${formatQty(size)} ${item.package_unit}` : null
+  if (count > 1) return `${formatQty(count)}-pack${sizeText ? ` · ${sizeText} each` : ''}`
+  return sizeText
+}
+
+const NUTRITION_ROWS = [
+  ['calories', 'Calories', ''],
+  ['protein', 'Protein', 'g'],
+  ['carbohydrates', 'Carbs', 'g'],
+  ['sugar', 'Sugar', 'g'],
+  ['fiber', 'Fiber', 'g'],
+  ['fat', 'Fat', 'g'],
+  ['saturated_fat', 'Sat. fat', 'g'],
+  ['sodium', 'Sodium', 'mg'],
+]
+
+function NutritionPanel({ product }) {
+  const rows = NUTRITION_ROWS.filter(([key]) => product[key] != null)
+  return (
+    <div className="mt-2 rounded-lg bg-gray-50 border border-gray-100 p-2.5">
+      <p className="text-xs font-medium text-gray-600 mb-1.5">
+        Per serving{product.serving_size ? ` · ${product.serving_size}` : ''}
+      </p>
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-4 gap-y-1">
+        {rows.map(([key, label, unit]) => (
+          <div key={key} className="flex justify-between text-xs">
+            <span className="text-gray-500">{label}</span>
+            <span className="text-gray-800 font-medium">{formatQty(product[key])}{unit}</span>
+          </div>
+        ))}
+      </div>
+      {product.source && (
+        <p className="text-[10px] text-gray-400 mt-1.5">
+          Source: {product.source.split('+').map(s => (s === 'usda' ? 'USDA' : 'Open Food Facts')).join(' + ')}
+        </p>
+      )}
+    </div>
+  )
+}
+
 const barColor = pct => (pct > 0.5 ? 'bg-green-500' : pct > 0.2 ? 'bg-yellow-400' : 'bg-red-400')
 
 const byName = (a, b) => a.name.localeCompare(b.name)
@@ -76,6 +127,16 @@ export default function PantryPage() {
   const [selecting, setSelecting] = useState(false)
   const [selectedIds, setSelectedIds] = useState(new Set())
   const [deletingSelected, setDeletingSelected] = useState(false)
+  const [nutritionOpen, setNutritionOpen] = useState(new Set())
+
+  function toggleNutrition(id) {
+    setNutritionOpen(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
 
   const filtered = items.filter(item => {
     const matchSearch = item.name.toLowerCase().includes(search.toLowerCase())
@@ -238,6 +299,11 @@ export default function PantryPage() {
             const left = remaining(item)
             const bought = formatPurchaseDate(item)
             const isSelected = selectedIds.has(item.id)
+            const unitPrice = formatUnitPrice(item)
+            const pkg = formatPackage(item)
+            const product = item.product_catalog?.lookup_status === 'found' ? item.product_catalog : null
+            const hasNutrition = product?.calories != null
+            const showNutrition = hasNutrition && nutritionOpen.has(item.id)
             return (
               <div
                 key={item.id}
@@ -277,11 +343,25 @@ export default function PantryPage() {
                       <div className={`h-full rounded-full ${barColor(left.pct)}`} style={{ width: `${left.pct * 100}%` }} />
                     </div>
                   )}
+                  {(pkg || unitPrice) && (
+                    <p className="text-xs text-gray-500 mt-1">
+                      {[pkg, unitPrice].filter(Boolean).join(' · ')}
+                    </p>
+                  )}
                   {bought && (
                     <p className="text-xs text-gray-400 mt-1">
                       Bought {bought}{item.store_of_purchase ? ` at ${item.store_of_purchase}` : ''}
                     </p>
                   )}
+                  {hasNutrition && !selecting && (
+                    <button
+                      onClick={() => toggleNutrition(item.id)}
+                      className="text-xs text-green-600 hover:text-green-800 font-medium mt-1"
+                    >
+                      {showNutrition ? 'Hide nutrition ▲' : `Nutrition · ${formatQty(product.calories)} cal/serving ▼`}
+                    </button>
+                  )}
+                  {showNutrition && <NutritionPanel product={product} />}
                 </div>
                 {!selecting && <div className="flex gap-2 ml-3 shrink-0">
                   <button

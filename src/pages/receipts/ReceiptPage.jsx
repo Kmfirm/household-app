@@ -189,6 +189,13 @@ export default function ReceiptPage() {
         store_of_purchase: storeName || null,
         purchase_price: parseFloat(item.price) || null,
         receipt_reference_id: receipt?.id ?? null,
+        product_key: item.product_key ?? null,
+        upc: item.upc ?? null,
+        package_size: item.package_size ?? null,
+        package_unit: item.package_unit ?? null,
+        pack_count: item.pack_count ?? null,
+        unit_price: item.unit_price ?? null,
+        unit_price_unit: item.unit_price_unit ?? null,
       })
     }
 

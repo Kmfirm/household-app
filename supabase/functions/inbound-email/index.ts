@@ -3,6 +3,7 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.97.0'
 import { RECEIPT_MODEL, EMAIL_RECEIPT_PROMPT, callClaude, parseClaudeJson, splitReceiptLines } from '../_shared/receipt.ts'
+import { enrichItems } from '../_shared/products.ts'
 
 const TOKEN_PATTERN = /\+([a-f0-9]{32})@/i
 const MAX_BODY_CHARS = 100_000
@@ -158,7 +159,13 @@ serve(async (req) => {
     }).select().single()
     if (receiptError) throw new Error(receiptError.message)
 
-    const { error: itemsError } = await supabase.from('pantry_items').insert(items.map(item => ({
+    // Package size, unit price and nutrition from barcode lookups (never fails the import)
+    const enriched = await enrichItems(supabase, items).catch(err => {
+      console.error('enrichment failed:', err.message)
+      return items
+    })
+
+    const { error: itemsError } = await supabase.from('pantry_items').insert(enriched.map(item => ({
       household_id: address.household_id,
       created_by: address.user_id,
       name: item.name,
@@ -171,6 +178,13 @@ serve(async (req) => {
       store_of_purchase: storeName,
       purchase_price: parseFloat(item.price) || null,
       receipt_reference_id: receipt.id,
+      product_key: item.product_key ?? null,
+      upc: item.upc ?? null,
+      package_size: item.package_size ?? null,
+      package_unit: item.package_unit ?? null,
+      pack_count: item.pack_count ?? null,
+      unit_price: item.unit_price ?? null,
+      unit_price_unit: item.unit_price_unit ?? null,
     })))
     if (itemsError) {
       await supabase.from('receipts').delete().eq('id', receipt.id)

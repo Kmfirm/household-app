@@ -1,4 +1,5 @@
 // Shared receipt parsing used by ocr-receipt (photos) and inbound-email (digital receipts)
+import { cleanText } from './products.ts'
 
 export const RECEIPT_MODEL = 'claude-haiku-4-5-20251001'
 
@@ -12,11 +13,16 @@ Each entry in lines must have:
 
 If type is "item":
 - scanned_name: string (original text exactly as on receipt, e.g. "SRBB VS BONE IN TH")
-- brand_name: string (fully expanded brand name, e.g. "ShopRite Bowl & Basket Bone-In Chicken Thighs")
-- generic_name: string (generic name with no brand, e.g. "Bone-In Chicken Thighs")
-- quantity: number (default 1)
-- unit: string (count, lbs, oz, kg, etc.)
-- price: number or null (the list price as printed — do NOT subtract discounts)
+- brand_name: string (full product name including brand, fully expanded, WITHOUT the size or count, e.g. "ShopRite Bowl & Basket Bone-In Chicken Thighs", "Kind Chewy Bars Variety Pack")
+- generic_name: string (generic name with no brand and no size, e.g. "Bone-In Chicken Thighs", "Chewy Granola Bars")
+- upc: string or null (the product code / UPC digits printed with the item, exactly as printed, e.g. "60265228030"; null if none)
+- quantity: number (how many were bought, e.g. "2 × $2.99" means 2; for items sold by weight, the weight in lbs; default 1)
+- unit: "count" for packaged items, or "lbs" for items sold by weight
+- package_size: number or null (size of ONE package from the product name, e.g. 16 for "16 oz"; for multi-packs the size of one piece, e.g. 0.81 for "0.81 oz, 20 count"; convert "half gallon" to 64 with unit "fl oz", "gallon" to 128 "fl oz", "quart" to 32 "fl oz")
+- package_unit: one of "oz", "fl oz", "lb", "g", "kg", "ml", "l", "gal", or null (use "fl oz" for liquids such as milk, juice, almondmilk)
+- pack_count: number or null (pieces per package, e.g. 20 for "20 count", 6 for "6 pk"; null for single items)
+- price: number or null (the line total paid for this line before discounts, e.g. "2 × $2.99 $5.98" means 5.98 — do NOT subtract discounts)
+- price_per_lb: number or null (only for items sold by weight, if the price per lb is printed, e.g. "1.42 lb @ $3.99/lb" means 3.99)
 - category: one of: produce, dairy, meat, frozen, pantry, beverages, snacks, other
 
 If type is "discount":
@@ -50,10 +56,18 @@ Example input lines on receipt:
   On Sale                0.60
 
 Example output lines:
-  { "type": "item", "scanned_name": "HUNT TOM DCD FIRE PC", "brand_name": "Hunt's Diced Fire Roasted Tomatoes", "generic_name": "Diced Fire Roasted Tomatoes", "price": 1.69, "quantity": 1, "unit": "count", "category": "pantry" }
+  { "type": "item", "scanned_name": "HUNT TOM DCD FIRE PC", "brand_name": "Hunt's Diced Fire Roasted Tomatoes", "generic_name": "Diced Fire Roasted Tomatoes", "upc": null, "price": 1.69, "quantity": 1, "unit": "count", "package_size": null, "package_unit": null, "pack_count": null, "price_per_lb": null, "category": "pantry" }
   { "type": "discount", "amount": 1.67, "label": "Hunts or Rotel Off" }
-  { "type": "item", "scanned_name": "SRBB CREAM CHS BRI", "brand_name": "ShopRite Bowl & Basket Cream Cheese Brick", "generic_name": "Cream Cheese Brick", "price": 1.69, "quantity": 1, "unit": "count", "category": "dairy" }
-  { "type": "discount", "amount": 0.60, "label": "On Sale" }`
+  { "type": "item", "scanned_name": "SRBB CREAM CHS BRI", "brand_name": "ShopRite Bowl & Basket Cream Cheese Brick", "generic_name": "Cream Cheese Brick", "upc": null, "price": 1.69, "quantity": 1, "unit": "count", "package_size": null, "package_unit": null, "pack_count": null, "price_per_lb": null, "category": "dairy" }
+  { "type": "discount", "amount": 0.60, "label": "On Sale" }
+
+Example digital receipt item:
+  Kind Chewy Bars Variety Pack, 0.81 oz, 20 count
+  60265228030
+  1 × $11.99
+  $11.99 TF
+Output:
+  { "type": "item", "scanned_name": "Kind Chewy Bars Variety Pack, 0.81 oz, 20 count", "brand_name": "Kind Chewy Bars Variety Pack", "generic_name": "Chewy Granola Bars", "upc": "60265228030", "price": 11.99, "quantity": 1, "unit": "count", "package_size": 0.81, "package_unit": "oz", "pack_count": 20, "price_per_lb": null, "category": "snacks" }`
 
 export const IMAGE_RECEIPT_PROMPT = `Extract information from this grocery receipt and return ONLY a valid JSON object, no other text.
 
@@ -124,7 +138,9 @@ export function splitReceiptLines(parsed: any) {
       lastItemIndex = items.length
       items.push({
         ...line,
-        name: line.generic_name ?? line.name,
+        scanned_name: cleanText(line.scanned_name),
+        brand_name: cleanText(line.brand_name),
+        name: cleanText(line.generic_name ?? line.name) ?? cleanText(line.brand_name) ?? 'Unknown item',
       })
     }
   }
