@@ -4,6 +4,7 @@ import { useHousehold } from '../../hooks/useHousehold'
 import { useUnitConversions } from '../../hooks/useUnitConversions'
 import { useCategories } from '../../hooks/useCategories'
 import ItemForm from './ItemForm'
+import PantryAiModal from './PantryAiModal'
 
 const CATEGORY_COLORS = {
   produce: 'bg-green-100 text-green-700',
@@ -119,7 +120,9 @@ export default function PantryPage() {
   const { household } = useHousehold()
   const { items, loading, addItem, updateItem, deleteItem, deleteItems } = usePantry(household?.id)
   const { getConversion, upsertConversion } = useUnitConversions(household?.id)
-  const { categories } = useCategories(household?.id)
+  const { categories, addCategory } = useCategories(household?.id)
+  const [showAi, setShowAi] = useState(false)
+  const [toast, setToast] = useState(null)
   // Also offer any category already on an item (e.g. one added on another device)
   const filterCategories = [...new Set([...categories, ...items.map(i => i.category).filter(Boolean)])]
   const [search, setSearch] = useState('')
@@ -210,12 +213,20 @@ export default function PantryPage() {
       {/* Header */}
       <div className="flex items-center justify-between mb-4">
         <h1 className="text-xl font-bold text-gray-800">Pantry</h1>
-        <button
-          onClick={() => { setEditItem(null); setShowForm(true) }}
-          className="bg-green-600 text-white text-sm px-4 py-2 rounded-lg hover:bg-green-700"
-        >
-          + Add Item
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={() => setShowAi(true)}
+            className="bg-purple-600 text-white text-sm px-3 py-2 rounded-lg hover:bg-purple-700"
+          >
+            ✨ AI add
+          </button>
+          <button
+            onClick={() => { setEditItem(null); setShowForm(true) }}
+            className="bg-green-600 text-white text-sm px-4 py-2 rounded-lg hover:bg-green-700"
+          >
+            + Add Item
+          </button>
+        </div>
       </div>
 
       {/* Search & filter */}
@@ -383,6 +394,27 @@ export default function PantryPage() {
               </div>
             )
           })}
+        </div>
+      )}
+
+      {showAi && (
+        <PantryAiModal
+          categories={categories}
+          addCategory={addCategory}
+          existingItems={items}
+          addItem={addItem}
+          onClose={() => setShowAi(false)}
+          onAdded={count => {
+            setShowAi(false)
+            setToast(`Added ${count} item${count !== 1 ? 's' : ''} to the pantry`)
+            setTimeout(() => setToast(null), 3500)
+          }}
+        />
+      )}
+
+      {toast && (
+        <div className="fixed bottom-20 left-4 right-4 md:left-auto md:right-6 md:max-w-sm bg-gray-800 text-white text-sm rounded-xl px-4 py-3 shadow-lg z-50">
+          {toast}
         </div>
       )}
 
