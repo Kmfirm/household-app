@@ -173,7 +173,7 @@ export default function AssignMealModal({
                     {cooks.map(({ plan, spare }) => (
                       <option key={plan.id} value={`c:${plan.id}`}>
                         {mealName(plan)} ({shortDay(plan.date)} {plan.meal_type}
-                        {spare !== null ? ` · ${spare > 0 ? spare : 0} spare` : ''})
+                        {spare !== null ? ` · ${spare} spare` : ''})
                       </option>
                     ))}
                   </optgroup>

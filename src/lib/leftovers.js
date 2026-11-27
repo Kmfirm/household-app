@@ -53,6 +53,7 @@ export function leftoverChoicesFor(dateStr, allPlans, leftovers, settings) {
     .filter(p => !isLeftoverSlot(p) && p.recipe_id && p.date <= dateStr && daysBetween(p.date, dateStr) <= keep)
     .sort((a, b) => b.date.localeCompare(a.date))
     .map(plan => ({ plan, spare: leftoverBudget(plan, allPlans, settings).spare }))
+  // Fridge rows from these cooks are covered by the cook (even when it has nothing spare)
   const cookIds = new Set(cooks.map(c => c.plan.id))
   const fridge = (leftovers ?? [])
     .filter(l => !cookIds.has(l.source_meal_plan_id) && (!l.expiration_date || l.expiration_date >= dateStr))
@@ -63,7 +64,8 @@ export function leftoverChoicesFor(dateStr, allPlans, leftovers, settings) {
       return { row, available: round1(Number(row.remaining_servings) - planned) }
     })
     .filter(f => f.available > 0)
-  return { cooks, fridge }
+  // Only offer cooks with servings to spare (null = recipe has no serving count, so unknown)
+  return { cooks: cooks.filter(c => c.spare === null || c.spare > 0), fridge }
 }
 
 // Problems with a leftover slot's timing. `fridge` is the linked leftovers row, if any.
