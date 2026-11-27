@@ -11,7 +11,11 @@ import { useMealPlan, getWeekStart, toDateStr, fromDateStr } from '../../hooks/u
 import { useMealTypes, DEFAULT_MEAL_TYPES } from '../../hooks/useMealTypes'
 import { useShoppingList } from '../../hooks/useShoppingList'
 import { useUnitConversions } from '../../hooks/useUnitConversions'
-import { applyMealPlanActions, deductForMeal } from '../../lib/mealPlanActions'
+import { useLeftovers } from '../../hooks/useLeftovers'
+import { useHouseholdSettings } from '../../hooks/useHouseholdSettings'
+import { useAuth } from '../../context/AuthContext'
+import { applyMealPlanActions } from '../../lib/mealPlanActions'
+import { setMealCooked, mealName, isLeftoverSlot } from '../../lib/leftovers'
 import AssignMealModal from './AssignMealModal'
 import MealDetailModal from './MealDetailModal'
 import AiChat from './AiChat'
@@ -52,7 +56,7 @@ function MealCard({ plan, onOpen, dragging = false, large = false }) {
       } ${plan.cooked ? 'opacity-60' : ''} ${dragging ? 'shadow-lg ring-2 ring-green-400 rotate-1' : 'hover:shadow-sm'}`}
     >
       <p className={`font-semibold leading-snug ${large ? '' : 'line-clamp-2'} ${plan.cooked ? 'line-through' : ''}`}>
-        {plan.recipes?.name ?? 'Leftovers'}
+        {isLeftoverSlot(plan) ? '♻ ' : ''}{mealName(plan)}
       </p>
       {(scale !== 1 || plan.cooked || (large && plan.recipes?.total_servings)) && (
         <p className="opacity-70 mt-0.5 text-xs">
@@ -61,7 +65,7 @@ function MealCard({ plan, onOpen, dragging = false, large = false }) {
             large && plan.recipes?.total_servings
               ? `${Math.round(plan.recipes.total_servings * scale * 10) / 10} servings`
               : null,
-            plan.cooked ? '✓ cooked' : null,
+            plan.cooked ? (isLeftoverSlot(plan) ? '✓ eaten' : '✓ cooked') : null,
           ].filter(Boolean).join(' · ')}
         </p>
       )}
@@ -197,7 +201,10 @@ export default function CalendarPage() {
   const { items: pantryItems } = usePantry(household?.id)
   const { conversions } = useUnitConversions(household?.id)
   const [weekStart, setWeekStart] = useState(getWeekStart())
-  const { plans, loading, addMeal, updateMeal, removeMeal } = useMealPlan(household?.id, weekStart)
+  const { plans, allPlans, loading, addMeal, updateMeal, removeMeal } = useMealPlan(household?.id, weekStart)
+  const { user } = useAuth()
+  const { leftovers, refresh: refreshLeftovers } = useLeftovers(household?.id)
+  const { settings } = useHouseholdSettings(household?.id)
   const { mealTypes, extraMealTypes, addMealType, removeMealType, reorderMealTypes } = useMealTypes(household?.id)
   const { addItem: addToShoppingList } = useShoppingList(household?.id)
 
@@ -215,6 +222,7 @@ export default function CalendarPage() {
   const [addingRow, setAddingRow] = useState(false)
   const [newRowName, setNewRowName] = useState('')
   const justDragged = useRef(false)
+  const toastSeq = useRef(0)
   const touchStartX = useRef(null)
 
   const sensors = useSensors(
@@ -262,12 +270,15 @@ export default function CalendarPage() {
     return map
   }, [plans])
 
-  const openPlan = plans.find(p => p.id === openPlanId) ?? null
+  const openPlan = allPlans.find(p => p.id === openPlanId) ?? null
   const activePlan = plans.find(p => p.id === activeDragId) ?? null
 
-  function showToast(msg, ms = 5000) {
-    setToast(msg)
-    setTimeout(() => setToast(null), ms)
+  // action: optional { label, run } shown as a button on the toast
+  function showToast(msg, ms = 5000, action = null) {
+    const id = ++toastSeq.current
+    setToast({ id, msg, action })
+    // Only clear this toast, not a newer one shown since
+    setTimeout(() => setToast(t => (t?.id === id ? null : t)), ms)
   }
 
   function changeView(next) {
@@ -334,31 +345,62 @@ export default function CalendarPage() {
     if (!justDragged.current) setOpenPlanId(id)
   }
 
-  async function toggleCooked(plan) {
-    if (plan.cooked) {
-      await updateMeal(plan.id, { cooked: false })
-      return
+  // Shared context for marking meals cooked/eaten (pantry + fridge leftovers)
+  function cookCtx() {
+    return { householdId: household.id, userId: user?.id, settings, conversions, updateMeal, allPlans }
+  }
+
+  async function cookMeal(plan, cooked) {
+    try {
+      return await setMealCooked(plan, cooked, cookCtx())
+    } finally {
+      refreshLeftovers()
     }
+  }
+
+  async function toggleCooked(plan) {
     if (cookingIds.has(plan.id)) return
+    const undoing = !!plan.cooked
     setCookingIds(prev => new Set([...prev, plan.id]))
     try {
-      const { deducted, skipped } = await deductForMeal(household.id, plan, plan.recipes, conversions)
-      await updateMeal(plan.id, { cooked: true })
-      const parts = [`Cooked ${plan.recipes?.name ?? 'meal'}.`]
+      const { deducted, skipped, restored, notes } = await cookMeal(plan, !undoing)
+      const name = mealName(plan)
+      const leftover = isLeftoverSlot(plan)
+      const parts = undoing
+        ? [`${name} marked not ${leftover ? 'eaten' : 'cooked'}.`]
+        : [`${leftover ? 'Ate' : 'Cooked'} ${name}.`]
       if (deducted.length) parts.push(`Updated ${deducted.length} pantry item${deducted.length !== 1 ? 's' : ''}.`)
+      if (restored.length) parts.push(`Put back ${restored.length} pantry item${restored.length !== 1 ? 's' : ''}.`)
       if (skipped.length) parts.push(`Not deducted: ${skipped.join(', ')}.`)
-      showToast(parts.join(' '), 6000)
+      parts.push(...notes)
+      // Offer a one-tap undo right after marking cooked/eaten
+      const action = undoing ? null : {
+        label: 'Undo',
+        run: () => toggleCooked({ ...plan, cooked: true, pantry_deductions: deducted.map(d => ({
+          id: d.id, name: d.name, unit: d.unit,
+          amount: Math.round((Number(d.from) - Number(d.to)) * 1000) / 1000,
+        })) }),
+      }
+      showToast(parts.join(' '), 8000, action)
     } catch (err) {
-      showToast(`Couldn't update pantry: ${err.message}`)
+      showToast(`Couldn't update ${undoing ? 'the meal' : 'the pantry'}: ${err.message}`)
     } finally {
       setCookingIds(prev => { const s = new Set(prev); s.delete(plan.id); return s })
     }
   }
 
+  async function addLeftoverSlot({ source, date, meal_type, servings }) {
+    const { error } = await addMeal({
+      date, meal_type, servings, is_leftover: true, leftover_of: source.id, recipe_id: source.recipe_id,
+    })
+    if (error) showToast(`Couldn't plan leftovers: ${error.message}`)
+    return { error }
+  }
+
   async function handleRemove(id) {
     const { error } = await removeMeal(id)
     if (error) showToast(`Couldn't remove meal: ${error.message}`)
-    else setOpenPlanId(null)
+    else if (id === openPlanId) setOpenPlanId(null) // removing a leftover slot keeps its cook open
   }
 
   async function addIngredientToList(ing, qty) {
@@ -412,7 +454,8 @@ export default function CalendarPage() {
 
   function aiApply(actions) {
     return applyMealPlanActions(actions, {
-      householdId: household.id, plans, addRecipe, addMeal, updateMeal, removeMeal, conversions,
+      householdId: household.id, plans, allPlans, leftovers, addRecipe, addMeal, updateMeal, removeMeal, conversions,
+      setCooked: cookMeal,
     })
   }
 
@@ -664,8 +707,16 @@ export default function CalendarPage() {
       </div>
 
       {toast && (
-        <div className="fixed bottom-20 left-4 right-4 md:left-auto md:right-6 md:max-w-sm bg-gray-800 text-white text-sm rounded-xl px-4 py-3 shadow-lg z-50">
-          {toast}
+        <div className="fixed bottom-20 left-4 right-4 md:left-auto md:right-6 md:max-w-sm bg-gray-800 text-white text-sm rounded-xl px-4 py-3 shadow-lg z-50 flex items-start gap-3">
+          <span className="flex-1">{toast.msg}</span>
+          {toast.action && (
+            <button
+              onClick={() => { const { run } = toast.action; setToast(null); run() }}
+              className="font-semibold text-green-300 hover:text-green-200 whitespace-nowrap"
+            >
+              {toast.action.label}
+            </button>
+          )}
         </div>
       )}
 
@@ -685,12 +736,18 @@ export default function CalendarPage() {
       {openPlan && (
         <MealDetailModal
           plan={openPlan}
+          allPlans={allPlans}
+          leftovers={leftovers}
+          settings={settings}
+          mealTypes={rows}
           pantryItems={pantryItems}
           cooking={cookingIds.has(openPlan.id)}
           onUpdate={updateMeal}
           onToggleCooked={toggleCooked}
           onRemove={handleRemove}
           onAddToList={addIngredientToList}
+          onAddLeftover={addLeftoverSlot}
+          onOpenPlan={setOpenPlanId}
           onClose={() => setOpenPlanId(null)}
         />
       )}

@@ -3,6 +3,7 @@
 // (meal_plans.leftover_id). Leftover slots never touch the pantry or shopping list.
 import { supabase } from './supabase'
 import { deductForMeal } from './mealPlanActions'
+import { restorePantryDeductions } from './pantryDeduction'
 import { addDaysStr, daysBetween, fromDateStr, toDateStr } from '../hooks/useMealPlan'
 
 const round1 = n => Math.round(n * 10) / 10
@@ -80,12 +81,14 @@ async function fetchRowFor(slot) {
 }
 
 // Marks a meal cooked/eaten (or undoes it) and keeps the pantry and fridge leftovers in step.
-// Returns { deducted, skipped, notes } for the toast.
+// Undoing a cook puts back what it took from the pantry and removes its fridge leftovers.
+// Returns { deducted, skipped, restored, notes } for the toast.
 export async function setMealCooked(plan, cooked, ctx) {
   const { householdId, userId, settings, conversions, updateMeal, allPlans } = ctx
   const notes = []
   let deducted = []
   let skipped = []
+  let restored = []
 
   if (isLeftoverSlot(plan)) {
     const servings = slotServings(plan, settings)
@@ -122,13 +125,18 @@ export async function setMealCooked(plan, cooked, ctx) {
     }
     const { error } = await updateMeal(plan.id, { cooked })
     if (error) throw error
-    return { deducted, skipped, notes }
+    return { deducted, skipped, restored, notes }
   }
 
   // A regular (cook) meal
   if (cooked) {
     ;({ deducted, skipped } = await deductForMeal(householdId, plan, plan.recipes, conversions))
-    const { error } = await updateMeal(plan.id, { cooked: true })
+    // Remember what came out of the pantry so undo can put it back
+    const pantry_deductions = deducted.map(d => ({
+      id: d.id, name: d.name, unit: d.unit,
+      amount: Math.round((Number(d.from) - Number(d.to)) * 1000) / 1000,
+    }))
+    const { error } = await updateMeal(plan.id, { cooked: true, pantry_deductions })
     if (error) throw error
 
     const { makes, own, planned } = leftoverBudget(plan, allPlans ?? [], settings)
@@ -149,11 +157,20 @@ export async function setMealCooked(plan, cooked, ctx) {
       }
     }
   } else {
-    const { error } = await updateMeal(plan.id, { cooked: false })
+    const saved = Array.isArray(plan.pantry_deductions) ? plan.pantry_deductions : null
+    if (saved?.length) {
+      const { restored: back, missing } = await restorePantryDeductions(saved)
+      restored = back
+      if (missing.length) notes.push(`No longer in the pantry, so not put back: ${missing.join(', ')}.`)
+    } else if (!saved) {
+      notes.push('This was marked cooked before undo could track the pantry, so pantry amounts were left as they are.')
+    }
+    const { error } = await updateMeal(plan.id, { cooked: false, pantry_deductions: null })
     if (error) throw error
-    await supabase.from('leftovers').delete().eq('source_meal_plan_id', plan.id)
+    const { data: removed } = await supabase.from('leftovers').delete().eq('source_meal_plan_id', plan.id).select('id')
+    if (removed?.length) notes.push('Removed its leftovers from the fridge.')
   }
-  return { deducted, skipped, notes }
+  return { deducted, skipped, restored, notes }
 }
 
 // Puts a fridge leftover on the plan (used outside the planner, e.g. the Leftovers page)

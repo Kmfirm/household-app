@@ -102,7 +102,29 @@ export async function deductIngredientsFromPantry(householdId, ingredients, conv
   ))
 
   return {
-    deducted: changed.map(p => ({ name: p.name, from: original.get(p.id), to: p.quantity, unit: p.unit })),
+    deducted: changed.map(p => ({ id: p.id, name: p.name, from: original.get(p.id), to: p.quantity, unit: p.unit })),
     skipped,
   }
+}
+
+// Puts amounts back into the pantry, e.g. when a cooked meal is undone.
+// deductions: [{ id, name, amount }] with amount in the item's own unit.
+// Returns { restored: [names], missing: [names of items no longer in the pantry] }
+export async function restorePantryDeductions(deductions = []) {
+  const ids = deductions.map(d => d.id).filter(Boolean)
+  if (!ids.length) return { restored: [], missing: [] }
+  const { data, error } = await supabase.from('pantry_items').select('id, quantity').in('id', ids)
+  if (error) throw error
+  const current = new Map((data ?? []).map(p => [p.id, Number(p.quantity) || 0]))
+  const restored = []
+  const missing = []
+  for (const d of deductions) {
+    if (!current.has(d.id)) { missing.push(d.name); continue }
+    const quantity = Math.round((current.get(d.id) + Number(d.amount)) * 1000) / 1000
+    current.set(d.id, quantity) // in case two entries hit the same item
+    const { error: upErr } = await supabase.from('pantry_items').update({ quantity }).eq('id', d.id)
+    if (upErr) throw upErr
+    restored.push(d.name)
+  }
+  return { restored, missing }
 }
