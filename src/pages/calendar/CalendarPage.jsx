@@ -198,7 +198,7 @@ function ViewOptions({ view, onViewChange, inverted, onInvertChange, rows, built
 export default function CalendarPage() {
   const { household } = useHousehold()
   const { recipes, addRecipe } = useRecipes(household?.id)
-  const { items: pantryItems } = usePantry(household?.id)
+  const { items: pantryItems, refetch: refreshPantry } = usePantry(household?.id)
   const { conversions } = useUnitConversions(household?.id)
   const [weekStart, setWeekStart] = useState(getWeekStart())
   const { plans, allPlans, loading, addMeal, updateMeal, removeMeal } = useMealPlan(household?.id, weekStart)
@@ -354,7 +354,9 @@ export default function CalendarPage() {
     try {
       return await setMealCooked(plan, cooked, cookCtx())
     } finally {
+      // Realtime pantry updates aren't reliable, so reload what cooking/undo changed
       refreshLeftovers()
+      refreshPantry()
     }
   }
 

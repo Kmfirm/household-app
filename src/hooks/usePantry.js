@@ -65,5 +65,5 @@ export function usePantry(householdId) {
     return { error, deletedCount: deletedIds.size }
   }
 
-  return { items, loading, addItem, updateItem, deleteItem, deleteItems }
+  return { items, loading, addItem, updateItem, deleteItem, deleteItems, refetch: fetchItems }
 }
