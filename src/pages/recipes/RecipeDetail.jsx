@@ -43,7 +43,8 @@ export default function RecipeDetail({ recipe, onEdit, onDelete, onBack, onRate 
   ).length
 
   async function handleCook(data) {
-    const { remaining, deducted = [], skipped = [] } = await cookRecipe({ ...data, conversions })
+    const { remaining, deducted = [], skipped: none = [], mismatched = [] } = await cookRecipe({ ...data, conversions })
+    const skipped = [...none, ...mismatched.map(m => m.name)]
     const base = remaining > 0
       ? `Cooked! ${remaining} serving${remaining !== 1 ? 's' : ''} saved as leftovers.`
       : 'Cooked!'

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { CONVERTIBLE_UNITS, WEIGHT_UNITS, toOz } from '../../hooks/useUnitConversions'
+import { isMeasuredUnit, WEIGHT_UNITS, toOz } from '../../hooks/useUnitConversions'
 
 function guessCountLabel(itemName) {
   const words = (itemName ?? '').toLowerCase().split(' ').filter(w => w.length > 2)
@@ -29,7 +29,7 @@ export default function ConversionPrompt({ itemName, quantity, unit, price, exis
   if (saved) return null
   if (!itemName?.trim()) return null
 
-  const isCountUnit = !CONVERTIBLE_UNITS.includes(unit?.toLowerCase())
+  const isCountUnit = !isMeasuredUnit(unit)
   const parsedQty = parseFloat(quantity) || 1
   const parsedPrice = price ? parseFloat(price) : null
 

@@ -82,12 +82,14 @@ async function fetchRowFor(slot) {
 
 // Marks a meal cooked/eaten (or undoes it) and keeps the pantry and fridge leftovers in step.
 // Undoing a cook puts back what it took from the pantry and removes its fridge leftovers.
-// Returns { deducted, skipped, restored, notes } for the toast.
+// Returns { deducted, skipped, mismatched, restored, notes } for the toast; mismatched lists
+// ingredients whose pantry item is in a unit that couldn't be compared (see pantryDeduction).
 export async function setMealCooked(plan, cooked, ctx) {
   const { householdId, userId, settings, conversions, updateMeal, allPlans } = ctx
   const notes = []
   let deducted = []
   let skipped = []
+  let mismatched = []
   let restored = []
 
   if (isLeftoverSlot(plan)) {
@@ -125,12 +127,12 @@ export async function setMealCooked(plan, cooked, ctx) {
     }
     const { error } = await updateMeal(plan.id, { cooked })
     if (error) throw error
-    return { deducted, skipped, restored, notes }
+    return { deducted, skipped, mismatched, restored, notes }
   }
 
   // A regular (cook) meal
   if (cooked) {
-    ;({ deducted, skipped } = await deductForMeal(householdId, plan, plan.recipes, conversions))
+    ;({ deducted, skipped, mismatched } = await deductForMeal(householdId, plan, plan.recipes, conversions))
     // Remember what came out of the pantry so undo can put it back
     const pantry_deductions = deducted.map(d => ({
       id: d.id, name: d.name, unit: d.unit,
@@ -170,7 +172,7 @@ export async function setMealCooked(plan, cooked, ctx) {
     const { data: removed } = await supabase.from('leftovers').delete().eq('source_meal_plan_id', plan.id).select('id')
     if (removed?.length) notes.push('Removed its leftovers from the fridge.')
   }
-  return { deducted, skipped, restored, notes }
+  return { deducted, skipped, mismatched, restored, notes }
 }
 
 // Puts a fridge leftover on the plan (used outside the planner, e.g. the Leftovers page)

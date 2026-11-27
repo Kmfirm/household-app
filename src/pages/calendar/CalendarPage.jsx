@@ -18,6 +18,8 @@ import { applyMealPlanActions } from '../../lib/mealPlanActions'
 import { setMealCooked, mealName, isLeftoverSlot } from '../../lib/leftovers'
 import AssignMealModal from './AssignMealModal'
 import MealDetailModal from './MealDetailModal'
+import UnitMismatchModal from './UnitMismatchModal'
+import { deductPantryAmounts, conversionFor } from '../../lib/pantryDeduction'
 import AiChat from './AiChat'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
@@ -199,7 +201,7 @@ export default function CalendarPage() {
   const { household } = useHousehold()
   const { recipes, addRecipe } = useRecipes(household?.id)
   const { items: pantryItems, refetch: refreshPantry } = usePantry(household?.id)
-  const { conversions } = useUnitConversions(household?.id)
+  const { conversions, upsertConversion } = useUnitConversions(household?.id)
   const [weekStart, setWeekStart] = useState(getWeekStart())
   const { plans, allPlans, loading, addMeal, updateMeal, removeMeal } = useMealPlan(household?.id, weekStart)
   const { user } = useAuth()
@@ -216,6 +218,7 @@ export default function CalendarPage() {
   const [assignSlot, setAssignSlot] = useState(null) // { date: Date, mealType }
   const [openPlanId, setOpenPlanId] = useState(null)
   const [cookingIds, setCookingIds] = useState(new Set())
+  const [mismatchPrompt, setMismatchPrompt] = useState(null) // { plan, mismatches, tracked } after a cook
   const [toast, setToast] = useState(null)
   const [activeDragId, setActiveDragId] = useState(null)
   const [showAssistant, setShowAssistant] = useState(false)
@@ -365,7 +368,7 @@ export default function CalendarPage() {
     const undoing = !!plan.cooked
     setCookingIds(prev => new Set([...prev, plan.id]))
     try {
-      const { deducted, skipped, restored, notes } = await cookMeal(plan, !undoing)
+      const { deducted, skipped, mismatched = [], restored, notes } = await cookMeal(plan, !undoing)
       const name = mealName(plan)
       const leftover = isLeftoverSlot(plan)
       const parts = undoing
@@ -375,19 +378,51 @@ export default function CalendarPage() {
       if (restored.length) parts.push(`Put back ${restored.length} pantry item${restored.length !== 1 ? 's' : ''}.`)
       if (skipped.length) parts.push(`Not deducted: ${skipped.join(', ')}.`)
       parts.push(...notes)
+      // What this cook took out of the pantry; the unit prompt adds to it, so undo puts that back too
+      const tracked = deducted.map(d => ({
+        id: d.id, name: d.name, unit: d.unit,
+        amount: Math.round((Number(d.from) - Number(d.to)) * 1000) / 1000,
+      }))
       // Offer a one-tap undo right after marking cooked/eaten
       const action = undoing ? null : {
         label: 'Undo',
-        run: () => toggleCooked({ ...plan, cooked: true, pantry_deductions: deducted.map(d => ({
-          id: d.id, name: d.name, unit: d.unit,
-          amount: Math.round((Number(d.from) - Number(d.to)) * 1000) / 1000,
-        })) }),
+        run: () => { setMismatchPrompt(null); toggleCooked({ ...plan, cooked: true, pantry_deductions: tracked }) },
       }
       showToast(parts.join(' '), 8000, action)
+      if (!undoing && mismatched.length) setMismatchPrompt({ plan, mismatches: mismatched, tracked })
     } catch (err) {
       showToast(`Couldn't update ${undoing ? 'the meal' : 'the pantry'}: ${err.message}`)
     } finally {
       setCookingIds(prev => { const s = new Set(prev); s.delete(plan.id); return s })
+    }
+  }
+
+  // The cook said how much they used of ingredients whose units didn't match the pantry
+  async function resolveMismatches(entries) {
+    const { plan, tracked } = mismatchPrompt
+    try {
+      const made = await deductPantryAmounts(entries.map(({ mismatch: m, amount }) => ({
+        id: m.item.id, name: m.item.name, unit: m.item.unit, amount,
+      })))
+      tracked.push(...made)
+      const { error } = await updateMeal(plan.id, { pantry_deductions: tracked })
+      if (error) throw error
+      let remembered = 0
+      for (const { mismatch, amount, remember } of entries) {
+        const conv = remember ? conversionFor(mismatch, amount) : null
+        if (!conv) continue
+        await upsertConversion(conv.name, conv.weight, conv.weightUnit, conv.count, conv.countUnit)
+        remembered++
+      }
+      setMismatchPrompt(null)
+      showToast(
+        `Updated ${made.length} more pantry item${made.length !== 1 ? 's' : ''}.` +
+        (remembered ? ' Saved the conversion for next time.' : '')
+      )
+    } catch (err) {
+      showToast(`Couldn't update the pantry: ${err.message}`)
+    } finally {
+      refreshPantry()
     }
   }
 
@@ -709,7 +744,7 @@ export default function CalendarPage() {
       </div>
 
       {toast && (
-        <div className="fixed bottom-20 left-4 right-4 md:left-auto md:right-6 md:max-w-sm bg-gray-800 text-white text-sm rounded-xl px-4 py-3 shadow-lg z-50 flex items-start gap-3">
+        <div className="fixed bottom-20 left-4 right-4 md:left-auto md:right-6 md:max-w-sm bg-gray-800 text-white text-sm rounded-xl px-4 py-3 shadow-lg z-[70] flex items-start gap-3">
           <span className="flex-1">{toast.msg}</span>
           {toast.action && (
             <button
@@ -751,6 +786,18 @@ export default function CalendarPage() {
           onAddLeftover={addLeftoverSlot}
           onOpenPlan={setOpenPlanId}
           onClose={() => setOpenPlanId(null)}
+        />
+      )}
+
+      {mismatchPrompt && (
+        <UnitMismatchModal
+          mealName={mealName(mismatchPrompt.plan)}
+          mismatches={mismatchPrompt.mismatches}
+          onSubmit={resolveMismatches}
+          onSkip={() => {
+            showToast(`Not deducted: ${mismatchPrompt.mismatches.map(m => m.name).join(', ')}.`)
+            setMismatchPrompt(null)
+          }}
         />
       )}
 

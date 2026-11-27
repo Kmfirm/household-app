@@ -31,7 +31,7 @@ export async function applyMealPlanActions(actions, ctx) {
   async function cook(plan, cooked) {
     const res = await setCooked(plan, cooked)
     pantry.deducted += res.deducted?.length ?? 0
-    pantry.skipped.push(...(res.skipped ?? []))
+    pantry.skipped.push(...(res.skipped ?? []), ...(res.mismatched ?? []).map(m => m.name))
   }
 
   const order = { create_recipe: 0, add_meal: 1, add_leftover: 2 }

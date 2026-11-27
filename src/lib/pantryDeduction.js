@@ -1,11 +1,12 @@
-﻿import { supabase } from './supabase'
-import { toOz } from '../hooks/useUnitConversions'
+import { supabase } from './supabase'
+import { toOz, canonicalUnit, isMeasuredUnit } from '../hooks/useUnitConversions'
 
 const COUNT_UNITS = new Set(['', 'each', 'ea', 'ct', 'count', 'pc', 'pcs', 'piece', 'pieces', 'whole', 'item', 'items', 'unit', 'units'])
 
-function normUnit(unit) {
+export function normUnit(unit) {
   const u = (unit ?? '').trim().toLowerCase().replace(/\.$/, '')
-  return COUNT_UNITS.has(u) ? 'each' : u
+  if (COUNT_UNITS.has(u)) return 'each'
+  return canonicalUnit(u) ?? u
 }
 
 function normName(name) {
@@ -45,7 +46,9 @@ function purchaseTime(item) {
 
 // Deducts the given ingredient amounts from the household pantry.
 // ingredients: [{ name, quantity, unit }] â€” quantities already scaled to what was cooked.
-// Returns { deducted: [{ name, from, to, unit }], skipped: [ingredient names] }
+// Returns { deducted: [{ name, from, to, unit }], skipped: [ingredient names with no pantry item],
+//   mismatched: [{ name, quantity, unit, item: { id, name, quantity, unit } }] } — ingredients that
+//   are in the pantry but in a unit that couldn't be compared, so the cook can say how much they used.
 export async function deductIngredientsFromPantry(householdId, ingredients, conversions = []) {
   const { data: pantry, error } = await supabase
     .from('pantry_items')
@@ -57,6 +60,7 @@ export async function deductIngredientsFromPantry(householdId, ingredients, conv
   const items = (pantry ?? []).map(p => ({ ...p, quantity: Number(p.quantity) || 0 }))
   const original = new Map(items.map(p => [p.id, p.quantity]))
   const skipped = []
+  const mismatched = []
 
   for (const ing of ingredients) {
     const needQty = Number(ing.quantity)
@@ -93,7 +97,13 @@ export async function deductIngredientsFromPantry(householdId, ingredients, conv
       }
     }
 
-    if (!touched) skipped.push(ing.name)
+    if (!touched) {
+      const item = matches[0]
+      mismatched.push({
+        name: ing.name, quantity: needQty, unit: ing.unit,
+        item: { id: item.id, name: item.name, quantity: item.quantity, unit: item.unit },
+      })
+    }
   }
 
   const changed = items.filter(p => p.quantity !== original.get(p.id))
@@ -104,7 +114,30 @@ export async function deductIngredientsFromPantry(householdId, ingredients, conv
   return {
     deducted: changed.map(p => ({ id: p.id, name: p.name, from: original.get(p.id), to: p.quantity, unit: p.unit })),
     skipped,
+    mismatched,
   }
+}
+
+// Takes given amounts out of specific pantry items (never below 0).
+// amounts: [{ id, name, unit, amount }] with amount in the item's own unit.
+// Returns the deductions actually made, in the shape restorePantryDeductions takes.
+export async function deductPantryAmounts(amounts = []) {
+  const ids = amounts.filter(a => a.amount > 0).map(a => a.id)
+  if (!ids.length) return []
+  const { data, error } = await supabase.from('pantry_items').select('id, quantity').in('id', ids)
+  if (error) throw error
+  const current = new Map((data ?? []).map(p => [p.id, Number(p.quantity) || 0]))
+  const made = []
+  for (const a of amounts) {
+    if (!(a.amount > 0) || !current.has(a.id)) continue
+    const from = current.get(a.id)
+    const to = Math.max(0, Math.round((from - a.amount) * 1000) / 1000)
+    current.set(a.id, to)
+    const { error: upErr } = await supabase.from('pantry_items').update({ quantity: to }).eq('id', a.id)
+    if (upErr) throw upErr
+    made.push({ id: a.id, name: a.name, unit: a.unit, amount: Math.round((from - to) * 1000) / 1000 })
+  }
+  return made
 }
 
 // Puts amounts back into the pantry, e.g. when a cooked meal is undone.
@@ -127,4 +160,17 @@ export async function restorePantryDeductions(deductions = []) {
     restored.push(d.name)
   }
   return { restored, missing }
+}
+
+// Which side of a mismatch is a count ("1 package") and which a weight/volume ("8 oz").
+// Returns null when both are counts, since a count-to-count link can't be stored as a conversion.
+export function conversionFor(m, amount) {
+  const recipeMeasured = isMeasuredUnit(m.unit)
+  const pantryMeasured = isMeasuredUnit(m.item.unit)
+  if (pantryMeasured === recipeMeasured || !(amount > 0)) return null
+  return pantryMeasured
+    // e.g. recipe "1 block", pantry "250 g": 1 block weighs `amount` g
+    ? { name: m.name, weight: amount, weightUnit: m.item.unit, count: m.quantity, countUnit: m.unit || 'each' }
+    // e.g. recipe "8 oz", pantry "1 package": `amount` packages weigh 8 oz
+    : { name: m.item.name, weight: m.quantity, weightUnit: m.unit, count: amount, countUnit: m.item.unit || 'each' }
 }

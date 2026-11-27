@@ -269,6 +269,16 @@ export default function MealDetailModal({
                   {scaleLabel(s)}
                 </button>
               ))}
+              {totalServings !== null && (
+                <span className="text-xs text-gray-500 flex items-center gap-1 ml-auto">
+                  Makes
+                  <ServingsInput
+                    value={totalServings}
+                    onCommit={n => changeScale(Math.round((n / plan.recipes.total_servings) * 10000) / 10000)}
+                  />
+                  servings
+                </span>
+              )}
             </div>
 
             {/* Ingredients */}

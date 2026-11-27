@@ -9,12 +9,41 @@ const OZ_FACTORS = {
   oz: 1, lbs: 16, lb: 16,
   g: 0.035274, kg: 35.274,
   cups: 8, liters: 33.814, l: 33.814, ml: 0.033814, gallons: 128,
+  tbsp: 0.5, tsp: 1 / 6, pints: 16, quarts: 32,
+}
+
+// Other spellings people (and receipts/AI) use, mapped to a key of OZ_FACTORS
+const UNIT_ALIASES = {
+  ounce: 'oz', ounces: 'oz', 'fl oz': 'oz', 'fl. oz': 'oz', floz: 'oz', 'fluid ounce': 'oz', 'fluid ounces': 'oz',
+  pound: 'lb', pounds: 'lb',
+  gram: 'g', grams: 'g', gr: 'g', grm: 'g',
+  kilogram: 'kg', kilograms: 'kg', kgs: 'kg', kilo: 'kg', kilos: 'kg',
+  cup: 'cups', c: 'cups',
+  liter: 'l', litre: 'l', litres: 'l',
+  milliliter: 'ml', milliliters: 'ml', millilitre: 'ml', millilitres: 'ml', mls: 'ml',
+  gallon: 'gallons', gal: 'gallons',
+  tablespoon: 'tbsp', tablespoons: 'tbsp', tbs: 'tbsp', tbl: 'tbsp', tbsps: 'tbsp',
+  teaspoon: 'tsp', teaspoons: 'tsp', tsps: 'tsp',
+  pint: 'pints', pt: 'pints',
+  quart: 'quarts', qt: 'quarts', qts: 'quarts',
+}
+
+// The OZ_FACTORS key for a unit as written ('Ounces' -> 'oz'), or null if it isn't a weight/volume
+export function canonicalUnit(unit) {
+  const u = (unit ?? '').trim().toLowerCase().replace(/\.$/, '')
+  if (OZ_FACTORS[u] !== undefined) return u
+  return UNIT_ALIASES[u] ?? null
+}
+
+// True for weight/volume units (anything toOz can convert without the count table)
+export function isMeasuredUnit(unit) {
+  return canonicalUnit(unit) !== null
 }
 
 // Convert quantity+unit to oz. Returns null if unit is not a known weight/volume.
 // Pass conversions array to also handle count units via the lookup table.
 export function toOz(quantity, unit, ingredientName, conversions) {
-  const factor = OZ_FACTORS[unit?.toLowerCase()]
+  const factor = OZ_FACTORS[canonicalUnit(unit)]
   if (factor !== undefined) return quantity * factor
 
   // Count unit — look up conversion table
@@ -30,7 +59,7 @@ export function toOz(quantity, unit, ingredientName, conversions) {
 
 // Convert oz back to a given unit. Returns null if unknown unit.
 export function fromOz(oz, unit) {
-  const factor = OZ_FACTORS[unit?.toLowerCase()]
+  const factor = OZ_FACTORS[canonicalUnit(unit)]
   return factor ? oz / factor : null
 }
 
@@ -62,7 +91,7 @@ export function useUnitConversions(householdId) {
     const parsedCount = parseFloat(count)
     if (!parsedCount || parsedCount <= 0) return
 
-    const isCountUnit = !CONVERTIBLE_UNITS.includes(totalUnit?.toLowerCase())
+    const isCountUnit = !isMeasuredUnit(totalUnit)
     let ozPerCount
     if (isCountUnit) {
       // count unit: the 'count' param is already oz per piece (user entered directly)
