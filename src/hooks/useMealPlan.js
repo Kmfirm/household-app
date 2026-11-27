@@ -4,15 +4,20 @@ import { useAuth } from '../context/AuthContext'
 
 export const PLAN_SELECT = '*, recipes(id, name, total_servings, recipe_ingredients(*))'
 
+// How far before the viewed week to load meals, so earlier cooks can feed this week's leftovers
+const LOOKBACK_DAYS = 7
+
 export function useMealPlan(householdId, weekStart) {
   const { user } = useAuth()
-  // Everything loaded: this week's meals plus meals linked to them in other weeks
-  // (the cook a leftover comes from, or leftovers planned from a cook)
+  // Everything loaded: this week's meals, the week before (cooks whose leftovers can be eaten
+  // this week), plus meals linked to them in other weeks (the cook a leftover comes from,
+  // or leftovers planned from a cook)
   const [allPlans, setAllPlans] = useState([])
   const [loading, setLoading] = useState(true)
 
   const weekStartStr = weekStart ? toDateStr(weekStart) : null
   const weekEndStr = weekStart ? toDateStr(addDaysToDate(weekStart, 6)) : null
+  const lookbackStr = weekStart ? toDateStr(addDaysToDate(weekStart, -LOOKBACK_DAYS)) : null
 
   useEffect(() => {
     if (!householdId || !weekStart) return
@@ -36,7 +41,7 @@ export function useMealPlan(householdId, weekStart) {
       .from('meal_plans')
       .select(PLAN_SELECT)
       .eq('household_id', householdId)
-      .gte('date', weekStartStr)
+      .gte('date', lookbackStr)
       .lte('date', weekEndStr)
       .order('date')
       .order('meal_type')

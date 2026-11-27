@@ -812,6 +812,9 @@ export default function CalendarPage() {
           allIngredients={allIngredients}
           getAiContext={aiContext}
           onAiApply={aiApply}
+          allPlans={allPlans}
+          leftovers={leftovers}
+          settings={settings}
           onSave={async (data) => {
             const { error } = await addMeal({ ...data, date: assignSlot.date })
             if (error) { showToast(`Couldn't add meal: ${error.message}`); return }

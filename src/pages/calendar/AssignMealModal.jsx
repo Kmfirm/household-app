@@ -2,15 +2,19 @@ import { useState } from 'react'
 import RecipeForm from '../recipes/RecipeForm'
 import AiChat from './AiChat'
 import { toDateStr } from '../../hooks/useMealPlan'
+import { leftoverChoicesFor, mealName, shortDay } from '../../lib/leftovers'
 
 const SCALES = [0.5, 1, 2]
 
 export default function AssignMealModal({
   date, initialMealType = 'dinner', mealTypes, recipes, onSave, onClose,
   onCreateRecipe, pantryItems = [], allIngredients = [], getAiContext, onAiApply,
+  allPlans = [], leftovers = [], settings = { servings_per_meal: 2, leftover_days: 4 },
 }) {
   const [tab, setTab] = useState('pick') // pick | ai
-  const [recipeId, setRecipeId] = useState('')
+  // '' | 'r:<recipe id>' | 'c:<planned cook id>' (its leftovers) | 'f:<fridge leftover id>'
+  const [choice, setChoice] = useState('')
+  const [servings, setServings] = useState(settings.servings_per_meal)
   const [mealType, setMealType] = useState(initialMealType)
   const [scale, setScale] = useState(1)
   const [loading, setLoading] = useState(false)
@@ -24,7 +28,7 @@ export default function AssignMealModal({
       return
     }
     setCreateError(null)
-    setRecipeId(created.id)
+    setChoice(`r:${created.id}`)
     setCreatingRecipe(false)
   }
 
@@ -47,7 +51,15 @@ export default function AssignMealModal({
   }
 
   const typeOptions = mealTypes.includes(mealType) ? mealTypes : [...mealTypes, mealType]
-  const selectedRecipe = recipes.find(r => r.id === recipeId)
+  const dateStr = toDateStr(date)
+  const { cooks, fridge } = leftoverChoicesFor(dateStr, allPlans, leftovers, settings)
+  const [kind, id] = choice ? [choice.slice(0, 1), choice.slice(2)] : ['', '']
+  const selectedRecipe = kind === 'r' ? recipes.find(r => r.id === id) : null
+  const selectedCook = kind === 'c' ? cooks.find(c => c.plan.id === id) : null
+  const selectedFridge = kind === 'f' ? fridge.find(f => f.row.id === id) : null
+  const isLeftover = !!(selectedCook || selectedFridge)
+  const available = selectedCook ? selectedCook.spare : selectedFridge?.available ?? null
+  const servingsNum = Number(servings) || 0
   const scaledServings = selectedRecipe
     ? Math.round(selectedRecipe.total_servings * scale * 10) / 10
     : null
@@ -58,9 +70,22 @@ export default function AssignMealModal({
 
   async function handleSubmit(e) {
     e.preventDefault()
-    if (!recipeId) return
+    if (!choice) return
     setLoading(true)
-    await onSave({ recipe_id: recipeId, meal_type: mealType, scale })
+    if (selectedCook) {
+      await onSave({
+        meal_type: mealType, is_leftover: true, servings: servingsNum || null,
+        leftover_of: selectedCook.plan.id, recipe_id: selectedCook.plan.recipe_id,
+      })
+    } else if (selectedFridge) {
+      const { row } = selectedFridge
+      await onSave({
+        meal_type: mealType, is_leftover: true, servings: servingsNum || null,
+        leftover_id: row.id, recipe_id: row.source_recipe_id ?? null, leftover_name: row.name,
+      })
+    } else if (selectedRecipe) {
+      await onSave({ recipe_id: selectedRecipe.id, meal_type: mealType, scale })
+    }
     setLoading(false)
   }
 
@@ -126,17 +151,47 @@ export default function AssignMealModal({
           <form onSubmit={handleSubmit} className="flex flex-col gap-4">
             {/* Recipe picker */}
             <div>
-              <label className="text-xs font-medium text-gray-600 mb-1 block">Recipe *</label>
+              <label className="text-xs font-medium text-gray-600 mb-1 block">Recipe or leftovers *</label>
               <select
                 required
-                value={recipeId}
-                onChange={e => setRecipeId(e.target.value)}
+                value={choice}
+                onChange={e => {
+                  const next = e.target.value
+                  setChoice(next)
+                  // Default a leftover meal to the usual servings, capped at what's spare
+                  const c = cooks.find(x => `c:${x.plan.id}` === next)
+                  const f = fridge.find(x => `f:${x.row.id}` === next)
+                  const spare = c ? c.spare : f?.available
+                  const usual = Number(settings.servings_per_meal) || 2
+                  if (c || f) setServings(spare > 0 ? Math.min(usual, spare) : usual)
+                }}
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-400"
               >
-                <option value="">Select a recipe...</option>
-                {recipes.map(r => (
-                  <option key={r.id} value={r.id}>{r.name}</option>
-                ))}
+                <option value="">Select a recipe or leftovers...</option>
+                {cooks.length > 0 && (
+                  <optgroup label="♻ Leftovers from planned meals">
+                    {cooks.map(({ plan, spare }) => (
+                      <option key={plan.id} value={`c:${plan.id}`}>
+                        {mealName(plan)} ({shortDay(plan.date)} {plan.meal_type}
+                        {spare !== null ? ` · ${spare > 0 ? spare : 0} spare` : ''})
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+                {fridge.length > 0 && (
+                  <optgroup label="♻ In the fridge">
+                    {fridge.map(({ row, available: n }) => (
+                      <option key={row.id} value={`f:${row.id}`}>
+                        {row.name} ({n} serving{n !== 1 ? 's' : ''})
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+                <optgroup label="Recipes">
+                  {recipes.map(r => (
+                    <option key={r.id} value={`r:${r.id}`}>{r.name}</option>
+                  ))}
+                </optgroup>
               </select>
               {onCreateRecipe && (
                 <button
@@ -149,7 +204,25 @@ export default function AssignMealModal({
               )}
             </div>
 
-            {/* Scale */}
+            {isLeftover ? (
+              <div>
+                <label className="text-xs font-medium text-gray-600 mb-1 block">Servings</label>
+                <input
+                  type="number" min="0.5" step="0.5" value={servings}
+                  onChange={e => setServings(e.target.value)}
+                  className="w-24 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-400"
+                />
+                {available !== null && servingsNum > available && (
+                  <p className="text-xs text-amber-700 mt-1.5">
+                    {available > 0 ? `Only ${available} spare` : 'No spare servings'}
+                    {selectedCook
+                      ? ` — after adding, open the ${shortDay(selectedCook.plan.date)} ${mealName(selectedCook.plan)} and raise its servings so there's enough.`
+                      : ' in the fridge.'}
+                  </p>
+                )}
+                <p className="text-[11px] text-gray-400 mt-1.5">Leftover meals don't use pantry items or add to the shopping list.</p>
+              </div>
+            ) : (
             <div>
               <label className="text-xs font-medium text-gray-600 mb-1 block">Scale</label>
               <div className="flex gap-2">
@@ -174,6 +247,7 @@ export default function AssignMealModal({
                 </p>
               )}
             </div>
+            )}
 
             <div className="flex gap-3 pt-1">
               <button
@@ -185,7 +259,7 @@ export default function AssignMealModal({
               </button>
               <button
                 type="submit"
-                disabled={loading || !recipeId}
+                disabled={loading || !choice}
                 className="flex-1 bg-green-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-green-700 disabled:opacity-50"
               >
                 {loading ? 'Adding...' : 'Add to plan'}

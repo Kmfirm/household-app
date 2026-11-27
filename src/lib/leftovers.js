@@ -44,6 +44,28 @@ export function leftoverBudget(source, allPlans, settings) {
   return { makes, own, planned, spare, slots, suggestedScale }
 }
 
+// Leftovers that could fill a meal on `dateStr`:
+//  cooks: planned (or cooked) meals on or before that day, within the keep window, with their spare servings
+//  fridge: fridge leftovers not past use-by, with servings not already planned
+export function leftoverChoicesFor(dateStr, allPlans, leftovers, settings) {
+  const keep = Number(settings.leftover_days) || 4
+  const cooks = allPlans
+    .filter(p => !isLeftoverSlot(p) && p.recipe_id && p.date <= dateStr && daysBetween(p.date, dateStr) <= keep)
+    .sort((a, b) => b.date.localeCompare(a.date))
+    .map(plan => ({ plan, spare: leftoverBudget(plan, allPlans, settings).spare }))
+  const cookIds = new Set(cooks.map(c => c.plan.id))
+  const fridge = (leftovers ?? [])
+    .filter(l => !cookIds.has(l.source_meal_plan_id) && (!l.expiration_date || l.expiration_date >= dateStr))
+    .map(row => {
+      const planned = allPlans
+        .filter(p => p.leftover_id === row.id && !p.cooked)
+        .reduce((sum, p) => sum + slotServings(p, settings), 0)
+      return { row, available: round1(Number(row.remaining_servings) - planned) }
+    })
+    .filter(f => f.available > 0)
+  return { cooks, fridge }
+}
+
 // Problems with a leftover slot's timing. `fridge` is the linked leftovers row, if any.
 export function leftoverWarnings(slot, { source, fridge, settings }) {
   const warnings = []
