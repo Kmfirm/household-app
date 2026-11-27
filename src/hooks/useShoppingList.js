@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import { getWeekStart, toDateStr } from './useMealPlan'
+import { plannedQty } from '../lib/mealPlanActions'
 
 export function useShoppingList(householdId) {
   const { user } = useAuth()
@@ -77,23 +78,25 @@ export function useShoppingList(householdId) {
 
     const { data: plans } = await supabase
       .from('meal_plans')
-      .select('recipe_id, servings, recipes(id, name, recipe_ingredients(*))')
+      .select('recipe_id, scale, ingredient_overrides, is_leftover, cooked, recipes(id, name, recipe_ingredients(*))')
       .eq('household_id', householdId)
       .gte('date', toDateStr(weekStart))
       .lte('date', toDateStr(weekEnd))
 
-    if (!plans?.length) return { count: 0 }
+    // Leftover meals are covered by the meal they come from; cooked meals are already done
+    const toCook = (plans ?? []).filter(p => !p.is_leftover && !p.cooked)
+    if (!toCook.length) return { count: 0 }
 
     // Aggregate required ingredients across all planned meals
     const required = {}
-    for (const plan of plans) {
+    for (const plan of toCook) {
       const ingredients = plan.recipes?.recipe_ingredients ?? []
       for (const ing of ingredients) {
         const key = ing.name.toLowerCase()
         if (!required[key]) {
           required[key] = { name: ing.name, quantity: 0, unit: ing.unit, category: ing.category ?? 'other', recipe_id: plan.recipe_id }
         }
-        required[key].quantity += ing.quantity * (plan.servings / (plan.recipes?.total_servings || 1))
+        required[key].quantity += plannedQty(plan, ing)
       }
     }
 

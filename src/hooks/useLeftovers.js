@@ -76,5 +76,5 @@ export function useLeftovers(householdId) {
     return result
   }
 
-  return { leftovers, loading, cookRecipe, updateServings, deleteLeftover }
+  return { leftovers, loading, cookRecipe, updateServings, deleteLeftover, refresh: fetchLeftovers }
 }

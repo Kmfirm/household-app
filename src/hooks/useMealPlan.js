@@ -2,10 +2,17 @@ import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 
+export const PLAN_SELECT = '*, recipes(id, name, total_servings, recipe_ingredients(*))'
+
 export function useMealPlan(householdId, weekStart) {
   const { user } = useAuth()
-  const [plans, setPlans] = useState([])
+  // Everything loaded: this week's meals plus meals linked to them in other weeks
+  // (the cook a leftover comes from, or leftovers planned from a cook)
+  const [allPlans, setAllPlans] = useState([])
   const [loading, setLoading] = useState(true)
+
+  const weekStartStr = weekStart ? toDateStr(weekStart) : null
+  const weekEndStr = weekStart ? toDateStr(addDaysToDate(weekStart, 6)) : null
 
   useEffect(() => {
     if (!householdId || !weekStart) return
@@ -22,38 +29,57 @@ export function useMealPlan(householdId, weekStart) {
       .subscribe()
 
     return () => supabase.removeChannel(channel)
-  }, [householdId, weekStart])
+  }, [householdId, weekStartStr])
 
   async function fetchPlans() {
-    const weekEnd = new Date(weekStart)
-    weekEnd.setDate(weekEnd.getDate() + 6)
-
     const { data } = await supabase
       .from('meal_plans')
-      .select('*, recipes(id, name, total_servings, recipe_ingredients(*))')
+      .select(PLAN_SELECT)
       .eq('household_id', householdId)
-      .gte('date', toDateStr(weekStart))
-      .lte('date', toDateStr(weekEnd))
+      .gte('date', weekStartStr)
+      .lte('date', weekEndStr)
       .order('date')
       .order('meal_type')
 
-    setPlans(data ?? [])
+    const week = data ?? []
+    const weekIds = week.map(p => p.id)
+    const sourceIds = [...new Set(week.map(p => p.leftover_of).filter(id => id && !weekIds.includes(id)))]
+    const filters = []
+    if (weekIds.length) filters.push(`leftover_of.in.(${weekIds.join(',')})`)
+    if (sourceIds.length) filters.push(`id.in.(${sourceIds.join(',')})`)
+
+    let linked = []
+    if (filters.length) {
+      const { data: more } = await supabase
+        .from('meal_plans')
+        .select(PLAN_SELECT)
+        .eq('household_id', householdId)
+        .or(filters.join(','))
+      linked = (more ?? []).filter(p => !weekIds.includes(p.id))
+    }
+
+    setAllPlans([...week, ...linked])
     setLoading(false)
   }
 
-  async function addMeal({ date, recipe_id, meal_type, scale, cooked }) {
+  async function addMeal({ date, recipe_id, meal_type, scale, cooked, servings, is_leftover, leftover_of, leftover_id, leftover_name }) {
     const { data, error } = await supabase
       .from('meal_plans')
       .insert({
         household_id: householdId,
         created_by: user.id,
         date: toDateStr(date),
-        recipe_id,
+        recipe_id: recipe_id ?? null,
         meal_type: (meal_type ?? 'dinner').trim().toLowerCase(),
         scale: scale ?? 1,
         cooked: cooked ?? false,
+        servings: servings ?? null,
+        is_leftover: !!is_leftover,
+        leftover_of: leftover_of ?? null,
+        leftover_id: leftover_id ?? null,
+        leftover_name: leftover_name ?? null,
       })
-      .select('*, recipes(id, name, total_servings, recipe_ingredients(*))')
+      .select(PLAN_SELECT)
       .single()
     // Don't rely on realtime to show the new meal
     if (!error) await fetchPlans()
@@ -65,21 +91,30 @@ export function useMealPlan(householdId, weekStart) {
     if (clean.date !== undefined) clean.date = toDateStr(clean.date)
     if (clean.meal_type !== undefined) clean.meal_type = clean.meal_type.trim().toLowerCase()
     // Update the screen first so drag-and-drop feels instant; roll back if the save fails
-    const before = plans.find(p => p.id === id)
-    setPlans(prev => prev.map(p => p.id === id ? { ...p, ...clean } : p))
+    const before = allPlans.find(p => p.id === id)
+    setAllPlans(prev => prev.map(p => p.id === id ? { ...p, ...clean } : p))
     const { error } = await supabase.from('meal_plans').update(clean).eq('id', id)
-    if (error && before) setPlans(prev => prev.map(p => p.id === id ? before : p))
+    if (error && before) setAllPlans(prev => prev.map(p => p.id === id ? before : p))
     return { error }
   }
 
-  // Realtime doesn't deliver DELETE events on filtered subscriptions, so update local state directly
+  // Realtime doesn't deliver DELETE events on filtered subscriptions, so update local state directly.
+  // Deleting a cook also deletes its planned leftovers (database cascade).
   async function removeMeal(id) {
     const { error } = await supabase.from('meal_plans').delete().eq('id', id)
-    if (!error) setPlans(prev => prev.filter(p => p.id !== id))
+    if (!error) setAllPlans(prev => prev.filter(p => p.id !== id && p.leftover_of !== id))
     return { error }
   }
 
-  return { plans, loading, addMeal, updateMeal, removeMeal }
+  const plans = allPlans.filter(p => p.date >= weekStartStr && p.date <= weekEndStr)
+
+  return { plans, allPlans, loading, addMeal, updateMeal, removeMeal, refresh: fetchPlans }
+}
+
+function addDaysToDate(date, n) {
+  const d = new Date(date)
+  d.setDate(d.getDate() + n)
+  return d
 }
 
 // YYYY-MM-DD in local time (toISOString would use UTC and roll evenings over to tomorrow)
@@ -94,6 +129,18 @@ export function toDateStr(date) {
 export function fromDateStr(s) {
   const [y, m, d] = s.split('-').map(Number)
   return new Date(y, m - 1, d)
+}
+
+// Shift a YYYY-MM-DD date by n days
+export function addDaysStr(dateStr, n) {
+  const d = fromDateStr(dateStr)
+  d.setDate(d.getDate() + n)
+  return toDateStr(d)
+}
+
+// Whole days from a to b (YYYY-MM-DD)
+export function daysBetween(a, b) {
+  return Math.round((fromDateStr(b) - fromDateStr(a)) / 86400000)
 }
 
 export function getWeekStart(date = new Date()) {
