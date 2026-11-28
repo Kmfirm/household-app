@@ -21,6 +21,10 @@ import MealDetailModal from './MealDetailModal'
 import UnitMismatchModal from './UnitMismatchModal'
 import { deductPantryAmounts, conversionFor } from '../../lib/pantryDeduction'
 import AiChat from './AiChat'
+import { DayWeather, WeatherLocationButton, WeatherLocationModal } from './Weather'
+import { useWeather } from '../../hooks/useWeather'
+import { useDayNotes } from '../../hooks/useDayNotes'
+import DayNote from './DayNote'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 const ROW_COLORS = {
@@ -215,6 +219,7 @@ export default function CalendarPage() {
   const [inverted, setInverted] = useState(() => loadPref(INVERT_KEY) === '1')
   const [selectedDay, setSelectedDay] = useState(today)
   const [showViewOptions, setShowViewOptions] = useState(false)
+  const [showWeatherLocation, setShowWeatherLocation] = useState(false)
   const [assignSlot, setAssignSlot] = useState(null) // { date: Date, mealType }
   const [openPlanId, setOpenPlanId] = useState(null)
   const [cookingIds, setCookingIds] = useState(new Set())
@@ -260,6 +265,8 @@ export default function CalendarPage() {
     return d
   })
   const dayStrs = days.map(toDateStr)
+  const weather = useWeather(dayStrs[0], dayStrs[6])
+  const dayNotes = useDayNotes(household?.id, dayStrs[0], dayStrs[6])
 
   // Rows: the household's ordered rows, plus any other meal type used this week
   const rows = useMemo(() => {
@@ -282,6 +289,11 @@ export default function CalendarPage() {
     setToast({ id, msg, action })
     // Only clear this toast, not a newer one shown since
     setTimeout(() => setToast(t => (t?.id === id ? null : t)), ms)
+  }
+
+  async function saveDayNote(date, text) {
+    const { error } = await dayNotes.saveNote(date, text)
+    if (error) showToast(`Couldn't save the note: ${error.message}`)
   }
 
   function changeView(next) {
@@ -476,6 +488,8 @@ export default function CalendarPage() {
       week: dayStrs.map((date, i) => ({ date, weekday: DAY_NAMES[i] })),
       ...(view === 'day' ? { viewing_day: selectedDay } : {}),
       meal_rows: rows,
+      // Household reminders for the week, e.g. who's out late; take them into account
+      day_notes: Object.entries(dayNotes.notes).map(([date, note]) => ({ date, note })),
       meals: plans.map(p => ({
         id: p.id,
         date: p.date,
@@ -517,9 +531,20 @@ export default function CalendarPage() {
               <p className={`text-[11px] ${isToday ? 'text-green-600' : 'text-gray-400'}`}>
                 {d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
               </p>
+              <DayWeather day={weather.days[dayStrs[i]]} />
             </button>
           )
         })}
+
+        {/* Day notes */}
+        <div className="sticky left-0 z-10 bg-white border-t border-gray-100 px-2 py-2">
+          <span className="text-xs font-semibold text-gray-600">📝 Notes</span>
+        </div>
+        {dayStrs.map(ds => (
+          <div key={`note-${ds}`} className={`border-l border-t border-gray-100 p-1 ${ds === today ? 'bg-green-50/40' : ''}`}>
+            <DayNote text={dayNotes.notes[ds]} onSave={text => saveDayNote(ds, text)} />
+          </div>
+        ))}
 
         {rows.map(row => (
           <div key={row} className="contents">
@@ -559,11 +584,14 @@ export default function CalendarPage() {
       <div
         className="grid"
         style={{
-          gridTemplateColumns: `5.5rem repeat(${rows.length}, minmax(8rem, 1fr))`,
-          minWidth: `${5.5 + rows.length * 8}rem`,
+          gridTemplateColumns: `5.5rem minmax(8rem, 1fr) repeat(${rows.length}, minmax(8rem, 1fr))`,
+          minWidth: `${5.5 + (rows.length + 1) * 8}rem`,
         }}
       >
         <div className="sticky left-0 z-10 bg-gray-50" />
+        <div className="px-2 py-2 border-l border-gray-100 bg-gray-50 flex items-center justify-center">
+          <span className="text-xs font-semibold text-gray-700">📝 Notes</span>
+        </div>
         {rows.map(row => (
           <div key={row} className="px-2 py-2 border-l border-gray-100 bg-gray-50 flex items-center justify-center gap-1">
             <span className="text-xs font-semibold text-gray-700 capitalize">{row}</span>
@@ -589,7 +617,11 @@ export default function CalendarPage() {
                 <p className={`text-[11px] ${isToday ? 'text-green-600' : 'text-gray-400'}`}>
                   {d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
                 </p>
+                <span className="block [&>span]:justify-start"><DayWeather day={weather.days[ds]} /></span>
               </button>
+              <div className={`border-l border-t border-gray-100 p-1 ${isToday ? 'bg-green-50/40' : ''}`}>
+                <DayNote text={dayNotes.notes[ds]} onSave={text => saveDayNote(ds, text)} />
+              </div>
               {rows.map(row => {
                 const id = cellId(ds, row)
                 return (
@@ -638,9 +670,20 @@ export default function CalendarPage() {
               <p className="text-[11px] font-medium">{DAY_NAMES[i]}</p>
               <p className="text-sm font-semibold leading-tight">{d.getDate()}</p>
               <p className={`text-[10px] ${selected ? 'text-green-100' : 'text-gray-400'}`}>{count ? `${count} meal${count !== 1 ? 's' : ''}` : '·'}</p>
+              <DayWeather day={weather.days[ds]} compact light={selected} />
             </button>
           )
         })}
+      </div>
+
+      <div className="rounded-xl border border-gray-200 bg-white shadow-sm px-3 py-2 mb-2">
+        <p className="text-xs font-semibold text-gray-600 mb-1">📝 Notes</p>
+        <DayNote
+          key={selectedDay}
+          text={dayNotes.notes[selectedDay]}
+          onSave={text => saveDayNote(selectedDay, text)}
+          placeholder="+ Add a reminder for this day"
+        />
       </div>
 
       <div className="flex flex-col gap-2">
@@ -685,6 +728,7 @@ export default function CalendarPage() {
           <button onClick={goToday} className="ml-1 text-xs px-2 py-1 rounded border border-gray-200 text-gray-600 hover:bg-gray-50">
             Today
           </button>
+          <span className="ml-1"><WeatherLocationButton weather={weather} onClick={() => setShowWeatherLocation(true)} /></span>
           <button
             onClick={() => setShowViewOptions(true)}
             className="ml-1 text-xs px-2 py-1 rounded border border-gray-200 text-gray-600 hover:bg-gray-50"
@@ -755,6 +799,10 @@ export default function CalendarPage() {
             </button>
           )}
         </div>
+      )}
+
+      {showWeatherLocation && (
+        <WeatherLocationModal weather={weather} onClose={() => setShowWeatherLocation(false)} />
       )}
 
       {showViewOptions && (
