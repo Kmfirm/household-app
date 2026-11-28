@@ -35,6 +35,10 @@ const ROW_COLORS = {
 const EXTRA_COLOR = 'bg-purple-50 border-purple-200 text-purple-900'
 const VIEW_KEY = 'mealPlanView'
 const INVERT_KEY = 'mealPlanInverted'
+// The week (and day, in day view) last looked at, so the planner reopens there
+const WEEK_KEY = 'mealPlanWeek'
+const DAY_KEY = 'mealPlanDay'
+const isDateStr = s => /^\d{4}-\d{2}-\d{2}$/.test(s ?? '')
 const cellId = (date, mealType) => `${date}|${mealType}`
 
 function loadPref(key) {
@@ -206,18 +210,32 @@ export default function CalendarPage() {
   const { recipes, addRecipe } = useRecipes(household?.id)
   const { items: pantryItems, refetch: refreshPantry } = usePantry(household?.id)
   const { conversions, upsertConversion } = useUnitConversions(household?.id)
-  const [weekStart, setWeekStart] = useState(getWeekStart())
+  const [weekStart, setWeekStart] = useState(() => {
+    const saved = loadPref(WEEK_KEY)
+    return isDateStr(saved) ? getWeekStart(fromDateStr(saved)) : getWeekStart()
+  })
   const { plans, allPlans, loading, addMeal, updateMeal, removeMeal } = useMealPlan(household?.id, weekStart)
   const { user } = useAuth()
   const { leftovers, refresh: refreshLeftovers } = useLeftovers(household?.id)
   const { settings } = useHouseholdSettings(household?.id)
   const { mealTypes, extraMealTypes, addMealType, removeMealType, reorderMealTypes } = useMealTypes(household?.id)
-  const { addItem: addToShoppingList } = useShoppingList(household?.id)
+  const { items: shoppingItems, addItem: addToShoppingList } = useShoppingList(household?.id)
 
   const today = toDateStr(new Date())
   const [view, setView] = useState(loadView)
   const [inverted, setInverted] = useState(() => loadPref(INVERT_KEY) === '1')
-  const [selectedDay, setSelectedDay] = useState(today)
+  const [selectedDay, setSelectedDay] = useState(() => {
+    // A day inside the restored week: the saved day, else today, else the week's first day
+    const start = toDateStr(weekStart)
+    const inWeek = ds => isDateStr(ds) && ds >= start && ds <= addDays(start, 6)
+    const saved = loadPref(DAY_KEY)
+    return inWeek(saved) ? saved : inWeek(today) ? today : start
+  })
+
+  // Remember where the planner was left
+  const weekStartStr = toDateStr(weekStart)
+  useEffect(() => { savePref(WEEK_KEY, weekStartStr) }, [weekStartStr])
+  useEffect(() => { savePref(DAY_KEY, selectedDay) }, [selectedDay])
   const [showViewOptions, setShowViewOptions] = useState(false)
   const [showWeatherLocation, setShowWeatherLocation] = useState(false)
   const [assignSlot, setAssignSlot] = useState(null) // { date: Date, mealType }
@@ -452,14 +470,17 @@ export default function CalendarPage() {
     else if (id === openPlanId) setOpenPlanId(null) // removing a leftover slot keeps its cook open
   }
 
-  async function addIngredientToList(ing, qty) {
-    await addToShoppingList({
+  async function addIngredientToList(ing, qty, plan) {
+    const { error } = await addToShoppingList({
       name: ing.name,
       quantity: qty,
       unit: ing.unit,
       category: ing.category ?? 'other',
       checked: false,
+      recipe_id: plan.recipe_id ?? null,
+      meal_plan_ids: [plan.id],
     })
+    if (error) showToast(`Couldn't add to the shopping list: ${error.message}`)
   }
 
   async function handleAddRow(e) {
@@ -826,6 +847,7 @@ export default function CalendarPage() {
           settings={settings}
           mealTypes={rows}
           pantryItems={pantryItems}
+          shoppingItems={shoppingItems}
           cooking={cookingIds.has(openPlan.id)}
           onUpdate={updateMeal}
           onToggleCooked={toggleCooked}

@@ -65,6 +65,7 @@ export default function RecipeDetail({ recipe, onEdit, onDelete, onBack, onRate 
         unit: ingredient.unit,
         category: ingredient.category ?? 'other',
         checked: false,
+        recipe_id: recipe.id,
       })
     }
     setAddedToList(true)

@@ -172,7 +172,7 @@ function LeftoverPlanner({ plan, allPlans, leftovers, settings, mealTypes, onUpd
 
 // Details for one planned meal
 export default function MealDetailModal({
-  plan, allPlans, leftovers, settings, mealTypes, pantryItems, cooking,
+  plan, allPlans, leftovers, settings, mealTypes, pantryItems, shoppingItems = [], cooking,
   onUpdate, onToggleCooked, onRemove, onAddToList, onAddLeftover, onOpenPlan, onClose,
 }) {
   const [qtyEdits, setQtyEdits] = useState({})
@@ -206,7 +206,7 @@ export default function MealDetailModal({
 
   async function addToList(ing, qty) {
     setAdding(prev => new Set([...prev, ing.id]))
-    await onAddToList(ing, qty)
+    await onAddToList(ing, qty, plan)
     setAdding(prev => { const s = new Set(prev); s.delete(ing.id); return s })
   }
 
@@ -286,6 +286,9 @@ export default function MealDetailModal({
               <div className="flex flex-col gap-1.5 border-t border-gray-100 pt-3">
                 {ingredients.map(ing => {
                   const match = getPantryMatch(ing, pantryItems)
+                  // Already added to the shopping list for this meal?
+                  const listed = shoppingItems.find(i =>
+                    i.meal_plan_ids?.includes(plan.id) && i.name.toLowerCase() === ing.name.toLowerCase())
                   const qty = qtyEdits[ing.id] ?? plannedQty(plan, ing)
                   return (
                     <div key={ing.id} className="flex items-center gap-2 text-xs text-gray-700">
@@ -306,13 +309,17 @@ export default function MealDetailModal({
                         </span>
                       ) : plan.cooked ? (
                         <span className="text-gray-300 italic w-24 text-right">had it</span>
+                      ) : listed ? (
+                        <span className="w-24 text-center text-green-700 bg-green-50 border border-green-200 rounded px-1.5 py-0.5">
+                          {listed.checked ? '✓ In cart' : '✓ On list'}
+                        </span>
                       ) : (
                         <button
                           onClick={() => addToList(ing, qty)}
                           disabled={adding.has(ing.id)}
                           className="w-24 border border-gray-200 rounded px-1.5 py-0.5 hover:bg-blue-50 hover:border-blue-400 hover:text-blue-700 disabled:opacity-40"
                         >
-                          + Shopping list
+                          {adding.has(ing.id) ? 'Adding…' : '+ Shopping list'}
                         </button>
                       )}
                     </div>

@@ -4,6 +4,7 @@ import { usePantry } from '../../hooks/usePantry'
 import { useShoppingList } from '../../hooks/useShoppingList'
 import { useCategories } from '../../hooks/useCategories'
 import CategorySelect from '../../components/common/CategorySelect'
+import { fromDateStr } from '../../hooks/useMealPlan'
 const UNITS = ['count', 'lbs', 'oz', 'g', 'kg', 'cups', 'liters', 'ml', 'gallons', 'dozen', 'bunch', 'bag', 'box', 'can', 'bottle', 'jar', 'tsp', 'tbsp']
 
 const EMPTY_FORM = { name: '', quantity: 1, unit: 'count', category: 'other', store: '' }
@@ -12,8 +13,8 @@ export default function ShoppingPage() {
   const { household } = useHousehold()
   const { items: pantryItems } = usePantry(household?.id)
   const {
-    items, loading,
-    addItem, toggleChecked, deleteItem, clearChecked,
+    items, meals, loading,
+    addItem, toggleChecked, setAllChecked, deleteItem, clearChecked,
     generateFromMealPlan, addCheckedToPantry,
   } = useShoppingList(household?.id)
   const { categories, addCategory } = useCategories(household?.id)
@@ -26,6 +27,12 @@ export default function ShoppingPage() {
 
   const unchecked = items.filter(i => !i.checked)
   const checked = items.filter(i => i.checked)
+  const allChecked = items.length > 0 && unchecked.length === 0
+
+  async function handleSelectAll() {
+    const { error } = await setAllChecked(!allChecked)
+    if (error) showToast(`Couldn't update the list: ${error.message}`)
+  }
 
   // Group unchecked items by category
   const grouped = unchecked.reduce((acc, item) => {
@@ -82,6 +89,14 @@ export default function ShoppingPage() {
       <div className="flex items-center justify-between mb-4">
         <h1 className="text-xl font-bold text-gray-800">Shopping List</h1>
         <div className="flex gap-2">
+          {items.length > 0 && (
+            <button
+              onClick={handleSelectAll}
+              className="text-xs text-gray-600 hover:text-green-700 px-3 py-2 border border-gray-200 rounded-lg"
+            >
+              {allChecked ? 'Unselect all' : 'Select all'}
+            </button>
+          )}
           {checked.length > 0 && (
             <button
               onClick={clearChecked}
@@ -180,6 +195,7 @@ export default function ShoppingPage() {
                   <ShoppingItem
                     key={item.id}
                     item={item}
+                    meals={meals}
                     onToggle={() => toggleChecked(item.id, !item.checked)}
                     onDelete={() => deleteItem(item.id)}
                   />
@@ -208,6 +224,7 @@ export default function ShoppingPage() {
                   <ShoppingItem
                     key={item.id}
                     item={item}
+                    meals={meals}
                     onToggle={() => toggleChecked(item.id, !item.checked)}
                     onDelete={() => deleteItem(item.id)}
                   />
@@ -228,7 +245,33 @@ export default function ShoppingPage() {
   )
 }
 
-function ShoppingItem({ item, onToggle, onDelete }) {
+// "today", "yesterday", or "Fri, Nov 27"
+function addedLabel(createdAt) {
+  if (!createdAt) return null
+  const d = new Date(createdAt)
+  const startOf = x => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime()
+  const days = Math.round((startOf(new Date()) - startOf(d)) / 86400000)
+  if (days === 0) return 'today'
+  if (days === 1) return 'yesterday'
+  return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
+}
+
+// What the item is for: the planned meals it was added for, else the recipe
+function forLabel(item, meals) {
+  const linked = (item.meal_plan_ids ?? []).map(id => meals[id]).filter(Boolean)
+    .sort((a, b) => a.date.localeCompare(b.date))
+  if (linked.length) {
+    return linked.map(m => {
+      const day = fromDateStr(m.date).toLocaleDateString('en-US', { weekday: 'short' })
+      return `${m.name} (${day} ${m.meal_type})`
+    }).join(', ')
+  }
+  return item.recipes?.name ?? null
+}
+
+function ShoppingItem({ item, meals, onToggle, onDelete }) {
+  const added = addedLabel(item.created_at)
+  const forWhat = forLabel(item, meals)
   return (
     <div className={`flex items-center gap-3 bg-white rounded-xl border px-4 py-3 shadow-sm transition-opacity ${item.checked ? 'opacity-50 border-gray-100' : 'border-gray-100'}`}>
       <button
@@ -246,8 +289,11 @@ function ShoppingItem({ item, onToggle, onDelete }) {
         <p className="text-xs text-gray-400">
           {item.quantity} {item.unit}
           {item.store ? ` · ${item.store}` : ''}
-          {item.auto_generated ? ' · from meal plan' : ''}
+          {added ? ` · added ${added}` : ''}
         </p>
+        {forWhat && (
+          <p className="text-xs text-green-700 truncate" title={forWhat}>for {forWhat}</p>
+        )}
       </div>
       <button
         onClick={onDelete}

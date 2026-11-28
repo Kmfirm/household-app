@@ -7,6 +7,8 @@ import { plannedQty } from '../lib/mealPlanActions'
 export function useShoppingList(householdId) {
   const { user } = useAuth()
   const [items, setItems] = useState([])
+  // Planned meals the items are for: { [meal_plan id]: { id, date, meal_type, name } }
+  const [meals, setMeals] = useState({})
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -29,19 +31,35 @@ export function useShoppingList(householdId) {
   async function fetchItems() {
     const { data } = await supabase
       .from('shopping_items')
-      .select('*')
+      .select('*, recipes(name)')
       .eq('household_id', householdId)
       .order('checked')
       .order('category')
       .order('name')
-    setItems(data ?? [])
+    const rows = data ?? []
+    setItems(rows)
     setLoading(false)
+
+    const ids = [...new Set(rows.flatMap(i => i.meal_plan_ids ?? []))]
+    if (ids.length) {
+      const { data: plans } = await supabase
+        .from('meal_plans')
+        .select('id, date, meal_type, leftover_name, recipes(name)')
+        .in('id', ids)
+      setMeals(Object.fromEntries((plans ?? []).map(p => [p.id, {
+        id: p.id, date: p.date, meal_type: p.meal_type, name: p.recipes?.name ?? p.leftover_name ?? 'Meal',
+      }])))
+    } else {
+      setMeals({})
+    }
   }
 
+  // Realtime isn't reliable, so reload after adding
   async function addItem(item) {
     const { error } = await supabase
       .from('shopping_items')
       .insert({ ...item, household_id: householdId, created_by: user.id })
+    if (!error) await fetchItems()
     return { error }
   }
 
@@ -57,6 +75,16 @@ export function useShoppingList(householdId) {
   async function deleteItem(id) {
     const { error } = await supabase.from('shopping_items').delete().eq('id', id)
     if (!error) setItems(prev => prev.filter(i => i.id !== id))
+    return { error }
+  }
+
+  // Check (or uncheck) every item at once
+  async function setAllChecked(checked) {
+    const ids = items.filter(i => i.checked !== checked).map(i => i.id)
+    if (!ids.length) return { error: null }
+    setItems(prev => prev.map(i => ({ ...i, checked })))
+    const { error } = await supabase.from('shopping_items').update({ checked }).in('id', ids)
+    if (error) await fetchItems()
     return { error }
   }
 
@@ -78,7 +106,7 @@ export function useShoppingList(householdId) {
 
     const { data: plans } = await supabase
       .from('meal_plans')
-      .select('recipe_id, scale, ingredient_overrides, is_leftover, cooked, recipes(id, name, recipe_ingredients(*))')
+      .select('id, recipe_id, scale, ingredient_overrides, is_leftover, cooked, recipes(id, name, recipe_ingredients(*))')
       .eq('household_id', householdId)
       .gte('date', toDateStr(weekStart))
       .lte('date', toDateStr(weekEnd))
@@ -94,9 +122,10 @@ export function useShoppingList(householdId) {
       for (const ing of ingredients) {
         const key = ing.name.toLowerCase()
         if (!required[key]) {
-          required[key] = { name: ing.name, quantity: 0, unit: ing.unit, category: ing.category ?? 'other', recipe_id: plan.recipe_id }
+          required[key] = { name: ing.name, quantity: 0, unit: ing.unit, category: ing.category ?? 'other', recipe_id: plan.recipe_id, meal_plan_ids: [] }
         }
         required[key].quantity += plannedQty(plan, ing)
+        if (!required[key].meal_plan_ids.includes(plan.id)) required[key].meal_plan_ids.push(plan.id)
       }
     }
 
@@ -129,6 +158,7 @@ export function useShoppingList(householdId) {
         category: m.category,
         auto_generated: true,
         recipe_id: m.recipe_id,
+        meal_plan_ids: m.meal_plan_ids,
         checked: false,
       })))
 
@@ -161,9 +191,11 @@ export function useShoppingList(householdId) {
 
   return {
     items,
+    meals,
     loading,
     addItem,
     toggleChecked,
+    setAllChecked,
     deleteItem,
     clearChecked,
     generateFromMealPlan,
