@@ -1,4 +1,5 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { useState } from 'react'
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { AuthProvider, useAuth } from './context/AuthContext'
 import { useHousehold } from './hooks/useHousehold'
 import Layout from './components/layout/Layout'
@@ -6,6 +7,7 @@ import Login from './pages/auth/Login'
 import Register from './pages/auth/Register'
 import HouseholdSetup from './pages/HouseholdSetup'
 import Dashboard from './pages/Dashboard'
+import { getHomePage } from './lib/homePage'
 import PantryPage from './pages/pantry/PantryPage'
 import RecipesPage from './pages/recipes/RecipesPage'
 import CalendarPage from './pages/calendar/CalendarPage'
@@ -29,6 +31,21 @@ function ProtectedRoute({ children }) {
   return user ? children : <Navigate to="/login" replace />
 }
 
+// "/" opens the user's chosen start page when the app is first loaded or just signed in to;
+// following the Dashboard link still shows the Dashboard
+function HomeRoute() {
+  const { user } = useAuth()
+  const location = useLocation()
+  // Decide once, when "/" is first shown, so changing the setting on the Dashboard doesn't jump away
+  const [redirectTo] = useState(() => {
+    const home = getHomePage(user)
+    const opening = location.key === 'default' || location.state?.openHome
+    return home !== '/' && opening ? home : null
+  })
+  if (redirectTo) return <Navigate to={redirectTo} replace />
+  return <Dashboard />
+}
+
 function AppRoutes() {
   return (
     <Routes>
@@ -44,7 +61,7 @@ function AppRoutes() {
           </ProtectedRoute>
         }
       >
-        <Route index element={<Dashboard />} />
+        <Route index element={<HomeRoute />} />
         <Route path="pantry" element={<PantryPage />} />
         <Route path="recipes" element={<RecipesPage />} />
         <Route path="calendar" element={<CalendarPage />} />

@@ -2,6 +2,45 @@ import { useAuth } from '../context/AuthContext'
 import { useHousehold } from '../hooks/useHousehold'
 import { usePantry } from '../hooks/usePantry'
 import { Link } from 'react-router-dom'
+import { useState } from 'react'
+import { ALL_NAV_ITEMS } from '../lib/navItems'
+import { getHomePage, setHomePage } from '../lib/homePage'
+
+// Which page the app opens on for this user
+function StartPagePicker({ user }) {
+  const [status, setStatus] = useState(null) // null | 'saving' | 'saved' | error message
+  const current = getHomePage(user)
+
+  async function change(path) {
+    setStatus('saving')
+    const { error } = await setHomePage(path)
+    setStatus(error ? `Couldn't save: ${error.message}` : 'saved')
+    if (!error) setTimeout(() => setStatus(s => (s === 'saved' ? null : s)), 2000)
+  }
+
+  return (
+    <div className="bg-white border border-gray-200 rounded-xl p-4 mb-4">
+      <label htmlFor="start-page" className="text-xs text-gray-500 font-medium mb-1 block">Start page</label>
+      <div className="flex items-center gap-3">
+        <select
+          id="start-page"
+          value={current}
+          onChange={e => change(e.target.value)}
+          disabled={status === 'saving'}
+          className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-400"
+        >
+          {ALL_NAV_ITEMS.map(({ to, label, icon }) => (
+            <option key={to} value={to}>{icon} {label}</option>
+          ))}
+        </select>
+        {status === 'saving' && <span className="text-xs text-gray-400">Saving…</span>}
+        {status === 'saved' && <span className="text-xs text-green-600">Saved</span>}
+        {status && status !== 'saving' && status !== 'saved' && <span className="text-xs text-red-600">{status}</span>}
+      </div>
+      <p className="text-xs text-gray-400 mt-1">The page the app opens on when you visit or sign in. You can still reach the Dashboard from the menu.</p>
+    </div>
+  )
+}
 
 export default function Dashboard() {
   const { user } = useAuth()
@@ -80,6 +119,8 @@ export default function Dashboard() {
           <p className="text-xs text-orange-600">Tap to see recipe suggestions that use them up.</p>
         </Link>
       )}
+
+      <StartPagePicker user={user} />
 
       {/* Invite code */}
       {household?.invite_code && (
